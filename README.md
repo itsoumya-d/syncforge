@@ -2,7 +2,7 @@
 
 **The Local-First, Peer-to-Peer CRDT Database for the Modern Web**
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL_3.0-red.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
 [![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen.svg)]()
 [![npm version](https://badge.fury.io/js/syncforge.svg)](https://badge.fury.io/js/syncforge)
@@ -310,4 +310,36 @@ A: Currently, SyncForge is optimized for JSON documents. For large binaries, it 
 **Email:** soumyadebnath1661@gmail.com
 **Phone:** +91 7031648617
 
-Licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+Licensed under the AGPL-3.0 License. See the [LICENSE](LICENSE) file for details.
+
+---
+
+## ⚖️ License — Dual-Licensed (AGPL-3.0 + Commercial)
+
+This project is **dual-licensed** to protect both open-source and commercial interests:
+
+### 🆓 Open Source — AGPL-3.0
+You may use, modify, and distribute this software under the [GNU Affero General Public License v3.0](https://www.gnu.org/licenses/agpl-3.0.html). **However**, AGPL-3.0 requires that:
+
+- ⚠️ **Any application using this library MUST also be open-sourced under AGPL-3.0**
+- ⚠️ This applies even if the software is only used as a **network service** (SaaS)
+- ⚠️ You must provide complete source code to ALL users who interact with your application
+
+### 💼 Commercial License — For Startups & Enterprises
+If you want to use this in a **proprietary, closed-source product** (SaaS, mobile app, internal tool, etc.), you **MUST** purchase a commercial license.
+
+| Tier | Price | Use Case |
+|:-----|:------|:---------|
+| Indie | $499/year | Solo developers, <$100K revenue |
+| Startup | $2,999/year | Teams up to 25, <$5M revenue |
+| Enterprise | $14,999/year | Unlimited seats, unlimited revenue |
+| OEM / White-Label | Custom pricing | Embedding in your product |
+
+### 📬 Contact for Licensing
+
+**Soumya Debnath** — Creator & Maintainer
+
+- 📧 Email: [soumyadebnath1661@gmail.com](mailto:soumyadebnath1661@gmail.com)
+- 📞 Phone / WhatsApp: [+91 7031648617](tel:+917031648617)
+- 🐙 GitHub: [github.com/itsoumya-d](https://github.com/itsoumya-d)
+
