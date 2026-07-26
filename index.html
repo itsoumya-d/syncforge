@@ -3,32 +3,28 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SyncForge | Deterministic CRDT State Synchronization</title>
-    <meta name="description" content="SyncForge is a high-performance deterministic CRDT state synchronization engine for local-first web applications. Build offline-ready collaborative tools with zero conflict.">
-    <meta property="og:title" content="SyncForge | Deterministic CRDT State Synchronization">
-    <meta property="og:description" content="SyncForge provides conflict-free state resolution for multiplayer collaborative tools.">
-    <meta property="og:type" content="website">
-    <meta property="og:url" content="https://itsoumya-d.github.io/syncforge/">
+    <title>SyncForge | CRDT Local-First Real-Time Database</title>
+    <meta name="description" content="Your database. Offline-first. Conflict-free. SyncForge is an elite free alternative to Firebase and Supabase.">
+    <meta property="og:title" content="SyncForge | CRDT Local-First Database">
+    <meta property="og:description" content="0ms sync, 100% offline, 0 conflicts. The ultimate real-time local-first database powered by CRDTs.">
     <meta name="twitter:card" content="summary_large_image">
-    <link rel="canonical" href="https://itsoumya-d.github.io/syncforge/">
-
+    
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@400;600;700;800&family=JetBrains+Mono&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=JetBrains+Mono:wght@400;500&family=Outfit:wght@500;700&display=swap" rel="stylesheet">
     
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
       "@type": "SoftwareApplication",
       "name": "SyncForge",
-      "operatingSystem": "Web",
-      "applicationCategory": "DeveloperApplication",
+      "applicationCategory": "Database",
+      "operatingSystem": "All",
       "offers": {
         "@type": "Offer",
         "price": "0",
         "priceCurrency": "USD"
-      },
-      "description": "Conflict-free deterministic CRDT state synchronization engine."
+      }
     }
     </script>
     <script type="application/ld+json">
@@ -37,40 +33,28 @@
       "@type": "FAQPage",
       "mainEntity": [{
         "@type": "Question",
-        "name": "What is SyncForge?",
+        "name": "Is SyncForge a free Firebase alternative?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "SyncForge is a deterministic CRDT synchronization engine tailored for offline-first local-first web apps."
+          "text": "Yes, SyncForge is a high-performance local-first free alternative to Firebase and Supabase, providing real-time sync with 0 conflicts."
         }
-      }]
-    }
-    </script>
-    <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "BreadcrumbList",
-      "itemListElement": [{
-        "@type": "ListItem",
-        "position": 1,
-        "name": "Home",
-        "item": "https://itsoumya-d.github.io/syncforge/"
       }]
     }
     </script>
 
     <style>
         :root {
-            --bg: #0A0A10;
+            --bg-color: #0A0A10;
             --primary: #FF6B6B;
             --secondary: #7C3AED;
-            --accent: #00F0FF;
-            --text-main: #FFFFFF;
-            --text-muted: #888899;
+            --tertiary: #06B6D4;
+            --text-body: #D1D5DB;
+            --text-heading: #F3F4F6;
+            --card-bg: rgba(255, 255, 255, 0.02);
+            --border-color: rgba(255, 255, 255, 0.06);
             --font-heading: 'Outfit', sans-serif;
             --font-body: 'Inter', sans-serif;
             --font-code: 'JetBrains Mono', monospace;
-            --glass-bg: rgba(255, 255, 255, 0.03);
-            --glass-border: rgba(255, 255, 255, 0.08);
         }
 
         * {
@@ -80,499 +64,873 @@
         }
 
         body {
-            background-color: var(--bg);
-            color: var(--text-main);
+            background-color: var(--bg-color);
+            color: var(--text-body);
             font-family: var(--font-body);
-            line-height: 1.6;
+            font-weight: 300;
+            line-height: 1.5;
             overflow-x: hidden;
-            background-image: 
-                linear-gradient(rgba(10, 10, 16, 0.9), rgba(10, 10, 16, 0.9)),
-                linear-gradient(90deg, rgba(124, 58, 237, 0.05) 1px, transparent 1px),
-                linear-gradient(rgba(124, 58, 237, 0.05) 1px, transparent 1px);
-            background-size: 100% 100%, 40px 40px, 40px 40px;
+            scroll-behavior: smooth;
         }
 
-        .mesh-gradient {
-            position: absolute;
-            top: -20%;
-            left: -10%;
-            width: 50vw;
-            height: 50vw;
-            background: radial-gradient(circle, var(--secondary) 0%, transparent 60%);
-            opacity: 0.15;
-            filter: blur(100px);
+        .dot-matrix {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background-image: radial-gradient(rgba(255,255,255,0.1) 1px, transparent 1px);
+            background-size: 24px 24px;
+            opacity: 0.3;
             z-index: -1;
             pointer-events: none;
         }
 
-        .mesh-gradient-2 {
-            position: absolute;
-            bottom: -20%;
-            right: -10%;
-            width: 50vw;
-            height: 50vw;
-            background: radial-gradient(circle, var(--primary) 0%, transparent 60%);
-            opacity: 0.1;
-            filter: blur(100px);
-            z-index: -1;
-            pointer-events: none;
+        h1, h2, h3, h4 {
+            font-family: var(--font-heading);
+            color: var(--text-heading);
+            letter-spacing: -0.02em;
         }
+
+        h1 { font-size: 80px; font-weight: 700; line-height: 1.1; }
+        h2 { font-size: 48px; font-weight: 700; margin-bottom: 24px; }
+        h3 { font-size: 32px; font-weight: 700; }
+        h4 { font-size: 24px; font-weight: 500; }
+        
+        @media (max-width: 768px) {
+            h1 { font-size: 48px; }
+            h2 { font-size: 32px; }
+        }
+
+        a { color: var(--tertiary); text-decoration: none; transition: opacity 0.3s; }
+        a:hover { opacity: 0.8; }
 
         .container {
             max-width: 1200px;
             margin: 0 auto;
-            padding: 0 2rem;
+            padding: 0 24px;
         }
 
-        header {
+        section {
+            padding: 120px 0;
+        }
+        
+        @media (max-width: 768px) {
+            section { padding: 80px 0; }
+        }
+
+        /* Nav */
+        nav {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 64px;
+            display: flex;
+            align-items: center;
+            border-bottom: 1px solid var(--border-color);
+            background: rgba(10, 10, 16, 0.8);
+            backdrop-filter: blur(12px);
+            z-index: 100;
+        }
+
+        .nav-content {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 2rem 0;
-            border-bottom: 1px solid var(--glass-border);
+            width: 100%;
         }
 
         .logo {
             font-family: var(--font-heading);
-            font-size: 1.5rem;
-            font-weight: 800;
-            letter-spacing: -0.5px;
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--text-heading);
             display: flex;
             align-items: center;
-            gap: 0.5rem;
+            gap: 8px;
         }
-
+        
         .logo span {
-            color: var(--accent);
+            color: var(--primary);
         }
 
+        .nav-links {
+            display: flex;
+            gap: 32px;
+            align-items: center;
+        }
+
+        .nav-links a {
+            font-size: 14px;
+            color: var(--text-body);
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            height: 48px;
+            padding: 16px 32px;
+            border-radius: 12px;
+            font-family: var(--font-body);
+            font-weight: 500;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border: none;
+            background: rgba(255, 107, 107, 0.1);
+            color: var(--primary);
+            border: 1px solid rgba(255, 107, 107, 0.2);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #FF6B6B, #FF8E8B);
+            color: #000;
+            border: none;
+            box-shadow: 0 4px 14px rgba(255, 107, 107, 0.2);
+        }
+
+        .btn:hover {
+            transform: scale(1.02);
+            box-shadow: 0 0 20px rgba(255, 107, 107, 0.4);
+        }
+
+        /* Hero */
         .hero {
-            padding: 6rem 0;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding-top: 64px;
             text-align: center;
         }
 
+        .hero-content {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 24px;
+            max-width: 800px;
+        }
+
         .hero h1 {
-            font-family: var(--font-heading);
-            font-size: 4.5rem;
-            line-height: 1.1;
-            margin-bottom: 1.5rem;
-            background: linear-gradient(to right, var(--text-main), var(--primary));
+            background: linear-gradient(to right, var(--text-heading), #9CA3AF);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .hero h1 span {
+            background: linear-gradient(to right, var(--primary), #FF8E8B);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
 
         .hero p {
-            font-size: 1.25rem;
-            color: var(--text-muted);
+            font-size: 20px;
             max-width: 600px;
-            margin: 0 auto 3rem;
+            margin: 0 auto;
         }
-
-        .glass-panel {
-            background: var(--glass-bg);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            border: 1px solid var(--glass-border);
+        
+        .crdt-demo {
+            margin-top: 48px;
+            display: flex;
+            gap: 32px;
+            justify-content: center;
+            align-items: center;
+            background: var(--card-bg);
+            padding: 32px;
             border-radius: 16px;
-            padding: 2rem;
+            border: 1px solid var(--border-color);
         }
-
-        /* Demo Styles */
-        .demo-container {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 2rem;
-            margin-top: 4rem;
+        
+        .crdt-box {
+            text-align: center;
         }
-
-        .demo-window {
-            background: rgba(0, 0, 0, 0.4);
-            border: 1px solid var(--glass-border);
-            border-radius: 12px;
-            overflow: hidden;
+        
+        .crdt-val {
+            font-size: 48px;
+            font-family: var(--font-code);
+            color: var(--secondary);
+            font-weight: 700;
+        }
+        
+        .crdt-label {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-body);
+            margin-bottom: 8px;
+        }
+        
+        .crdt-sync {
             display: flex;
             flex-direction: column;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .crdt-arrow {
+            width: 40px;
+            height: 2px;
+            background: var(--tertiary);
+            position: relative;
         }
 
-        .demo-header {
-            background: var(--glass-bg);
-            padding: 0.75rem 1rem;
+        /* Metrics */
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 24px;
+            text-align: center;
+        }
+        
+        .metric-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 48px;
+            transition: all 0.3s ease;
+        }
+        
+        .metric-card:hover {
+            border-color: rgba(255, 255, 255, 0.15);
+            box-shadow: 0 0 30px rgba(6, 182, 212, 0.05);
+        }
+        
+        .metric-value {
+            font-family: var(--font-heading);
+            font-size: 64px;
+            font-weight: 700;
+            color: var(--text-heading);
+            margin-bottom: 8px;
+        }
+        
+        .metric-label {
+            font-size: 16px;
+            color: var(--text-body);
+        }
+
+        /* Cost */
+        .cost-comparison {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 24px;
+            margin-top: 64px;
+        }
+        
+        .cost-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 32px;
+        }
+        
+        .cost-card.highlight {
+            border-color: var(--primary);
+            box-shadow: 0 0 20px rgba(255, 107, 107, 0.1);
+            position: relative;
+        }
+        
+        .badge {
+            position: absolute;
+            top: -12px;
+            right: 24px;
+            background: var(--primary);
+            color: #000;
+            font-size: 12px;
+            font-weight: 700;
+            padding: 4px 12px;
+            border-radius: 99px;
+        }
+        
+        .cost-price {
+            font-size: 48px;
+            font-family: var(--font-heading);
+            font-weight: 700;
+            color: var(--text-heading);
+            margin: 16px 0;
+        }
+        
+        .cost-name {
+            font-size: 20px;
+            font-weight: 500;
+        }
+
+        /* Architecture */
+        .arch-flow {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            border-bottom: 1px solid var(--glass-border);
-            font-family: var(--font-code);
-            font-size: 0.85rem;
-            color: var(--accent);
+            background: var(--card-bg);
+            padding: 48px;
+            border-radius: 16px;
+            border: 1px solid var(--border-color);
+            margin-top: 48px;
+            overflow-x: auto;
         }
-
-        .demo-body {
-            padding: 1.5rem;
-            flex: 1;
-        }
-
-        .demo-input {
-            width: 100%;
-            height: 150px;
-            background: transparent;
-            border: none;
-            color: var(--text-main);
-            font-family: var(--font-body);
-            font-size: 1.1rem;
-            resize: none;
-            outline: none;
-        }
-
-        .vector-clock {
-            font-family: var(--font-code);
-            font-size: 0.8rem;
-            color: var(--text-muted);
-            margin-top: 1rem;
-            text-align: right;
-        }
-
-        .sync-animation {
-            grid-column: 1 / -1;
+        
+        .arch-step {
             display: flex;
-            justify-content: center;
+            flex-direction: column;
             align-items: center;
-            gap: 1rem;
+            gap: 16px;
+            text-align: center;
+            min-width: 120px;
+        }
+        
+        .arch-icon {
+            width: 64px;
+            height: 64px;
+            border-radius: 50%;
+            background: rgba(124, 58, 237, 0.1);
+            border: 1px solid var(--secondary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
             color: var(--secondary);
-            font-family: var(--font-code);
-            font-size: 0.9rem;
-            height: 40px;
         }
 
-        .sync-dot {
-            width: 8px;
-            height: 8px;
-            background: var(--accent);
-            border-radius: 50%;
-            opacity: 0;
+        /* Code Playground */
+        .code-section {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            overflow: hidden;
         }
+        
+        .code-tabs {
+            display: flex;
+            border-bottom: 1px solid var(--border-color);
+            background: rgba(255, 255, 255, 0.01);
+        }
+        
+        .code-tab {
+            padding: 16px 24px;
+            font-family: var(--font-code);
+            font-size: 14px;
+            cursor: pointer;
+            color: var(--text-body);
+            border-right: 1px solid var(--border-color);
+        }
+        
+        .code-tab.active {
+            color: var(--secondary);
+            background: rgba(124, 58, 237, 0.05);
+            border-bottom: 2px solid var(--secondary);
+        }
+        
+        .code-content {
+            padding: 32px;
+            font-family: var(--font-code);
+            font-size: 14px;
+            color: #A78BFA;
+            background: #0D0D14;
+            min-height: 200px;
+        }
+        
+        .token-keyword { color: #F472B6; }
+        .token-string { color: #34D399; }
+        .token-function { color: #60A5FA; }
 
         /* Features */
         .features {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 2rem;
-            margin: 6rem 0;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 24px;
         }
         
-        .feature-card h3 {
-            font-family: var(--font-heading);
-            color: var(--primary);
-            margin-bottom: 1rem;
-            font-size: 1.5rem;
-        }
-
-        /* Calculator */
-        .calculator {
-            margin: 6rem 0;
+        .feature-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 32px;
+            transition: all 0.3s;
         }
         
-        .calculator h2 {
-            font-family: var(--font-heading);
-            text-align: center;
-            margin-bottom: 2rem;
-            font-size: 2.5rem;
+        .feature-card:hover {
+            border-color: rgba(255, 255, 255, 0.15);
+            background: rgba(255, 255, 255, 0.03);
         }
-
-        .calc-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 2rem;
-        }
-
-        .slider-container {
-            margin-bottom: 2rem;
-        }
-
-        .slider-container label {
-            display: block;
-            margin-bottom: 0.5rem;
-            color: var(--text-muted);
-        }
-
-        input[type=range] {
-            width: 100%;
-            accent-color: var(--primary);
-        }
-
-        .cost-display {
-            font-family: var(--font-code);
-            font-size: 2rem;
-            color: var(--accent);
-            margin-top: 1rem;
-        }
-
-        /* Tabs */
-        .tabs {
-            margin: 6rem 0;
-        }
-
-        .tab-headers {
+        
+        .feature-icon {
+            width: 48px;
+            height: 48px;
+            background: rgba(6, 182, 212, 0.1);
+            border-radius: 12px;
             display: flex;
-            gap: 1rem;
-            margin-bottom: 1rem;
-            border-bottom: 1px solid var(--glass-border);
-            padding-bottom: 1rem;
-        }
-
-        .tab-btn {
-            background: transparent;
-            border: none;
-            color: var(--text-muted);
-            font-family: var(--font-code);
-            cursor: pointer;
-            padding: 0.5rem 1rem;
-            border-radius: 6px;
-            transition: all 0.2s;
-        }
-
-        .tab-btn.active {
-            background: var(--glass-bg);
-            color: var(--text-main);
-            border: 1px solid var(--glass-border);
-        }
-
-        .tab-content {
-            display: none;
-            font-family: var(--font-code);
-            font-size: 0.9rem;
-            color: #a9b7c6;
-            background: #1e1e1e;
-            padding: 1.5rem;
-            border-radius: 8px;
-            overflow-x: auto;
-        }
-
-        .tab-content.active {
-            display: block;
+            align-items: center;
+            justify-content: center;
+            color: var(--tertiary);
+            font-size: 24px;
+            margin-bottom: 24px;
         }
         
-        .keyword-highlight { color: #cc7832; }
-        .string-highlight { color: #6a8759; }
+        .feature-card h4 {
+            margin-bottom: 16px;
+        }
+
+        /* FAQ */
+        .faq-item {
+            border-bottom: 1px solid var(--border-color);
+            padding: 32px 0;
+        }
+        
+        .faq-question {
+            font-size: 24px;
+            font-family: var(--font-heading);
+            font-weight: 500;
+            color: var(--text-heading);
+            margin-bottom: 16px;
+        }
+
+        /* Pricing */
+        .pricing {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 24px;
+        }
+        
+        .pricing-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 48px;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .pricing-card h3 {
+            margin-bottom: 8px;
+        }
+        
+        .price {
+            font-size: 48px;
+            font-family: var(--font-heading);
+            font-weight: 700;
+            color: var(--text-heading);
+            margin: 24px 0;
+        }
+        
+        .pricing-list {
+            list-style: none;
+            margin: 24px 0 32px 0;
+            flex-grow: 1;
+        }
+        
+        .pricing-list li {
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .pricing-list li::before {
+            content: "✓";
+            color: var(--primary);
+            font-weight: bold;
+        }
 
         /* Footer */
         footer {
-            border-top: 1px solid var(--glass-border);
-            padding: 4rem 0;
-            margin-top: 6rem;
+            border-top: 1px solid var(--border-color);
+            padding: 64px 0;
             text-align: center;
-            color: var(--text-muted);
         }
         
-        footer p {
-            margin-bottom: 0.5rem;
+        @media (max-width: 900px) {
+            .metrics, .cost-comparison, .pricing {
+                grid-template-columns: 1fr;
+            }
+            .arch-flow {
+                flex-direction: column;
+                gap: 32px;
+            }
+        }
+        
+        .gsap-reveal {
+            opacity: 0;
+            visibility: hidden;
         }
     </style>
 </head>
 <body>
-    <div class="mesh-gradient"></div>
-    <div class="mesh-gradient-2"></div>
 
-    <div class="container">
-        <header>
+    <div class="dot-matrix"></div>
+
+    <nav>
+        <div class="container nav-content">
             <div class="logo">Sync<span>Forge</span></div>
-            <nav>
-                <a href="#" style="color: var(--text-main); text-decoration: none; font-weight: 500;">Docs</a>
-            </nav>
-        </header>
+            <div class="nav-links">
+                <a href="#features">Features</a>
+                <a href="#pricing">Pricing</a>
+                <a href="#docs">Docs</a>
+                <button class="btn btn-primary" style="height: 40px; padding: 0 24px; font-size: 14px;">Get Started</button>
+            </div>
+        </div>
+    </nav>
 
+    <main>
         <section class="hero">
-            <h1>Zero-Conflict<br>State Resolution</h1>
-            <p>High-performance deterministic CRDT engine for local-first web applications. Build multiplayer experiences without a central authority.</p>
-
-            <div class="glass-panel demo-container">
-                <div class="demo-window">
-                    <div class="demo-header">
-                        Client A (Alice) 
-                        <span id="status-a">Online</span>
+            <div class="container hero-content">
+                <h1 class="hero-text">Your database.<br><span>Offline-first.</span><br>Conflict-free.</h1>
+                <p class="hero-desc">The ultimate real-time local-first database powered by CRDTs. Build local-first apps with zero latency and true offline capabilities.</p>
+                
+                <div class="crdt-demo">
+                    <div class="crdt-box">
+                        <div class="crdt-label">Client A</div>
+                        <div class="crdt-val" id="valA">0</div>
                     </div>
-                    <div class="demo-body">
-                        <textarea class="demo-input" id="input-a" placeholder="Type here..."></textarea>
-                        <div class="vector-clock">Vector Clock: <span id="vc-a">{"A":0, "B":0}</span></div>
+                    <div class="crdt-sync">
+                        <div class="crdt-label">Sync</div>
+                        <div class="crdt-arrow"></div>
                     </div>
-                </div>
-
-                <div class="demo-window">
-                    <div class="demo-header">
-                        Client B (Bob)
-                        <span id="status-b">Online</span>
-                    </div>
-                    <div class="demo-body">
-                        <textarea class="demo-input" id="input-b" placeholder="Type here..."></textarea>
-                        <div class="vector-clock">Vector Clock: <span id="vc-b">{"A":0, "B":0}</span></div>
+                    <div class="crdt-box">
+                        <div class="crdt-label">Client B</div>
+                        <div class="crdt-val" id="valB">0</div>
                     </div>
                 </div>
-
-                <div class="sync-animation" id="sync-anim">
-                    Network State: Synchronized
+                
+                <div style="margin-top: 32px; display: flex; gap: 16px;">
+                    <button class="btn btn-primary">Start Building</button>
+                    <button class="btn">Read Docs</button>
                 </div>
             </div>
         </section>
 
-        <section class="features">
-            <div class="glass-panel feature-card">
-                <h3>AEO Optimized: Deterministic Merging</h3>
-                <p>SyncForge utilizes Lamport Vector Clocks and Conflict-Free Replicated Data Types (CRDTs) to guarantee strong eventual consistency across all distributed nodes. Changes commute inherently.</p>
-            </div>
-            <div class="glass-panel feature-card">
-                <h3>Offline-First Architecture</h3>
-                <p>Clients write to a local IndexedDB store synchronously. Changes are gossiped asynchronously via WebRTC data channels or WebSockets when network connectivity resumes.</p>
-            </div>
-            <div class="glass-panel feature-card">
-                <h3>Differential Privacy Ready</h3>
-                <p>Built with end-to-end encryption in mind. State payloads are encrypted before traversing the network, ensuring zero-knowledge relay by signaling servers.</p>
-            </div>
-        </section>
-
-        <section class="calculator glass-panel">
-            <h2>ROI & Cost Calculator</h2>
-            <div class="calc-grid">
-                <div>
-                    <div class="slider-container">
-                        <label>Monthly Active Users (MAU): <span id="mau-val">10000</span></label>
-                        <input type="range" id="mau-slider" min="1000" max="1000000" step="1000" value="10000">
-                    </div>
-                    <div class="slider-container">
-                        <label>State Updates / User / Day: <span id="updates-val">50</span></label>
-                        <input type="range" id="updates-slider" min="1" max="500" value="50">
-                    </div>
+        <section class="container" id="metrics">
+            <div class="metrics">
+                <div class="metric-card gsap-reveal">
+                    <div class="metric-value" id="stat-sync">0</div>
+                    <div class="metric-label">ms Sync Latency</div>
                 </div>
-                <div>
-                    <div style="margin-bottom: 1rem;">
-                        <span style="color: var(--text-muted)">Firebase / Supabase Est. Cost:</span>
-                        <div class="cost-display" style="color: var(--primary)">$<span id="saas-cost">150</span>/mo</div>
-                    </div>
-                    <div>
-                        <span style="color: var(--text-muted)">SyncForge (Self-Hosted + P2P) Cost:</span>
-                        <div class="cost-display">$<span id="sf-cost">5</span>/mo</div>
-                    </div>
+                <div class="metric-card gsap-reveal">
+                    <div class="metric-value" id="stat-offline">0</div>
+                    <div class="metric-label">% Offline Capable</div>
+                </div>
+                <div class="metric-card gsap-reveal">
+                    <div class="metric-value" id="stat-conflicts">0</div>
+                    <div class="metric-label">Conflicts Resolved</div>
                 </div>
             </div>
         </section>
 
-        <section class="tabs glass-panel">
-            <div class="tab-headers">
-                <button class="tab-btn active" onclick="switchTab(1)">Initialize</button>
-                <button class="tab-btn" onclick="switchTab(2)">Mutate State</button>
+        <section class="container" id="cost">
+            <h2 class="gsap-reveal text-center">Stop paying for empty space</h2>
+            <div class="cost-comparison">
+                <div class="cost-card highlight gsap-reveal">
+                    <div class="badge">Best Value</div>
+                    <div class="cost-name">SyncForge</div>
+                    <div class="cost-price">$0</div>
+                    <p>Local-first. Your users' devices handle the load.</p>
+                </div>
+                <div class="cost-card gsap-reveal">
+                    <div class="cost-name">Firebase</div>
+                    <div class="cost-price">$15K<span style="font-size:16px;font-weight:400">/mo</span></div>
+                    <p>Traditional cloud DB. Expensive at scale.</p>
+                </div>
+                <div class="cost-card gsap-reveal">
+                    <div class="cost-name">Supabase</div>
+                    <div class="cost-price">$599<span style="font-size:16px;font-weight:400">/mo</span></div>
+                    <p>Great for cloud, not built for local-first.</p>
+                </div>
             </div>
-            <div class="tab-content active" id="tab-1">
-<pre>
-<span class="keyword-highlight">import</span> { SyncForge } <span class="keyword-highlight">from</span> <span class="string-highlight">'@syncforge/core'</span>;
+        </section>
+        
+        <section class="container" id="architecture">
+            <h2 class="gsap-reveal">How it works</h2>
+            <p class="gsap-reveal">CRDT merge flow ensures data consistency across all nodes without a central server.</p>
+            
+            <div class="arch-flow gsap-reveal">
+                <div class="arch-step">
+                    <div class="arch-icon">1</div>
+                    <h4>Local Write</h4>
+                    <p>Instant write to IndexedDB</p>
+                </div>
+                <div style="color:var(--border-color)">→</div>
+                <div class="arch-step">
+                    <div class="arch-icon">2</div>
+                    <h4>Vector Clock</h4>
+                    <p>Logical timestamp attached</p>
+                </div>
+                <div style="color:var(--border-color)">→</div>
+                <div class="arch-step">
+                    <div class="arch-icon">3</div>
+                    <h4>Replicate</h4>
+                    <p>P2P sync when online</p>
+                </div>
+                <div style="color:var(--border-color)">→</div>
+                <div class="arch-step">
+                    <div class="arch-icon">4</div>
+                    <h4>Merge</h4>
+                    <p>CRDTs resolve state automatically</p>
+                </div>
+            </div>
+        </section>
 
-<span class="keyword-highlight">const</span> store = <span class="keyword-highlight">new</span> SyncForge({
-    client_id: <span class="string-highlight">'client_alice_123'</span>,
-    storage: <span class="string-highlight">'indexeddb'</span>,
-    sync_mode: <span class="string-highlight">'p2p_webrtc'</span>
+        <section class="container" id="playground">
+            <h2 class="gsap-reveal">Developer Experience</h2>
+            <div class="code-section gsap-reveal">
+                <div class="code-tabs">
+                    <div class="code-tab active" data-target="code-init">Initialize</div>
+                    <div class="code-tab" data-target="code-put">Put</div>
+                    <div class="code-tab" data-target="code-sub">Subscribe</div>
+                    <div class="code-tab" data-target="code-sync">Sync</div>
+                </div>
+                <div class="code-content" id="code-content">
+<pre><code><span class="token-keyword">import</span> { SyncForge } <span class="token-keyword">from</span> <span class="token-string">'@syncforge/core'</span>;
+
+<span class="token-keyword">const</span> db = <span class="token-keyword">new</span> <span class="token-function">SyncForge</span>({
+  name: <span class="token-string">'my-offline-db'</span>,
+  provider: <span class="token-string">'indexeddb'</span>
 });
 
-<span class="keyword-highlight">await</span> store.init();
-</pre>
-            </div>
-            <div class="tab-content" id="tab-2">
-<pre>
-<span class="keyword-highlight">const</span> doc = store.getDocument(<span class="string-highlight">'doc_xyz'</span>);
-
-<span class="keyword-highlight">await</span> doc.transact((state) => {
-    state.text.insert(5, <span class="string-highlight">'Hello'</span>);
-    state.metadata.set(<span class="string-highlight">'last_edited_by'</span>, <span class="string-highlight">'Alice'</span>);
-});
-</pre>
+<span class="token-keyword">await</span> db.<span class="token-function">init</span>();
+<span class="token-keyword">console</span>.<span class="token-function">log</span>(<span class="token-string">'DB ready in 0ms'</span>);</code></pre>
+                </div>
             </div>
         </section>
 
-        <footer>
-            <p><strong>Built by:</strong> Soumya Debnath</p>
-            <p><strong>Contact:</strong> soumyadebnath1661@gmail.com | +91 7031648617</p>
-            <p><strong>License:</strong> BSL 1.1 (Business Source License) - Free for non-production & small-scale use (< $1M ARR).</p>
-        </footer>
-    </div>
+        <section class="container" id="features">
+            <h2 class="gsap-reveal">Features that forge the future</h2>
+            <div class="features">
+                <div class="feature-card gsap-reveal">
+                    <div class="feature-icon">⚡</div>
+                    <h4>CRDTs Built-in</h4>
+                    <p>Conflict-free replicated data types handle complex state merging automatically.</p>
+                </div>
+                <div class="feature-card gsap-reveal">
+                    <div class="feature-icon">💾</div>
+                    <h4>IndexedDB Native</h4>
+                    <p>Optimized storage utilizing the browser's native database capabilities.</p>
+                </div>
+                <div class="feature-card gsap-reveal">
+                    <div class="feature-icon">🔗</div>
+                    <h4>P2P Sync</h4>
+                    <p>WebRTC powered peer-to-peer synchronization without server bottlenecks.</p>
+                </div>
+                <div class="feature-card gsap-reveal">
+                    <div class="feature-icon">✈️</div>
+                    <h4>100% Offline</h4>
+                    <p>Full read/write capabilities disconnected. Syncs instantly upon reconnection.</p>
+                </div>
+                <div class="feature-card gsap-reveal">
+                    <div class="feature-icon">🔒</div>
+                    <h4>E2E Encryption</h4>
+                    <p>Data is encrypted at rest and in transit. Only clients hold the keys.</p>
+                </div>
+                <div class="feature-card gsap-reveal">
+                    <div class="feature-icon">🔄</div>
+                    <h4>Schema Migration</h4>
+                    <p>Painless versioning and schema migrations that just work, even in distributed systems.</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="container" id="faq">
+            <h2 class="gsap-reveal">Frequently Asked Questions</h2>
+            <div class="faq-item gsap-reveal">
+                <div class="faq-question">Is SyncForge a free Firebase alternative?</div>
+                <p>Yes, SyncForge is an elite local-first free alternative to Firebase and Supabase. By shifting compute and storage to the client, you save drastically on cloud costs while providing a superior, instant UI experience.</p>
+            </div>
+            <div class="faq-item gsap-reveal">
+                <div class="faq-question">How does conflict resolution work?</div>
+                <p>SyncForge utilizes state-of-the-art CRDTs (Conflict-free Replicated Data Types). When two clients modify the same data offline, the mathematical properties of CRDTs ensure that once they sync, both clients will converge to the exact same state without arbitrary "last-write-wins" data loss.</p>
+            </div>
+        </section>
+
+        <section class="container" id="pricing">
+            <h2 class="gsap-reveal">BSL 1.1 Pricing</h2>
+            <p class="gsap-reveal">Free for most. Paid for large enterprises.</p>
+            <div class="pricing">
+                <div class="pricing-card gsap-reveal">
+                    <h3>Indie</h3>
+                    <div class="price">$399</div>
+                    <ul class="pricing-list">
+                        <li>Up to $1M ARR</li>
+                        <li>Community Support</li>
+                        <li>Full Source Access</li>
+                    </ul>
+                    <button class="btn">Buy License</button>
+                </div>
+                <div class="pricing-card gsap-reveal" style="border-color: var(--primary);">
+                    <h3>Startup</h3>
+                    <div class="price">$2,999</div>
+                    <ul class="pricing-list">
+                        <li>Up to $10M ARR</li>
+                        <li>Priority Email Support</li>
+                        <li>Commercial Use</li>
+                    </ul>
+                    <button class="btn btn-primary">Buy License</button>
+                </div>
+                <div class="pricing-card gsap-reveal">
+                    <h3>Enterprise</h3>
+                    <div class="price">$14,999</div>
+                    <ul class="pricing-list">
+                        <li>Unlimited ARR</li>
+                        <li>SLA + Slack Channel</li>
+                        <li>Custom Integrations</li>
+                    </ul>
+                    <button class="btn">Contact Sales</button>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <div class="logo" style="justify-content: center; margin-bottom: 24px;">Sync<span>Forge</span></div>
+            <p style="color: var(--border-color)">© 2026 SyncForge. BSL 1.1 License.</p>
+        </div>
+    </footer>
+
+    <!-- GSAP -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/ScrollTrigger.min.js"></script>
+    <!-- CountUp -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/countup.js/2.8.0/countUp.umd.js"></script>
 
     <script>
-        // CRDT Demo Logic (Simplified LWW / State Merge for Demo Purposes)
-        const inputA = document.getElementById('input-a');
-        const inputB = document.getElementById('input-b');
-        const vcA = document.getElementById('vc-a');
-        const vcB = document.getElementById('vc-b');
-        const anim = document.getElementById('sync-anim');
-        
-        let clock = { A: 0, B: 0 };
-        let state = "";
-        let syncTimeout;
+        document.addEventListener('DOMContentLoaded', () => {
+            gsap.registerPlugin(ScrollTrigger);
 
-        function updateClockDisplay() {
-            vcA.textContent = JSON.stringify(clock);
-            vcB.textContent = JSON.stringify(clock);
-        }
-
-        function syncState(source) {
-            anim.innerHTML = `Syncing changes from Client ${source}...`;
-            anim.style.color = 'var(--primary)';
+            // Hero Text Animation
+            const heroText = document.querySelector('.hero-text');
+            // Simple split effect
+            heroText.style.opacity = 1;
+            gsap.fromTo('.hero-text', 
+                { y: 50, opacity: 0 }, 
+                { y: 0, opacity: 1, duration: 1, ease: "power3.out" }
+            );
             
-            clearTimeout(syncTimeout);
-            syncTimeout = setTimeout(() => {
-                if (source === 'A') {
-                    inputB.value = inputA.value;
-                } else {
-                    inputA.value = inputB.value;
+            gsap.fromTo('.hero-desc',
+                { y: 30, opacity: 0 },
+                { y: 0, opacity: 1, duration: 1, delay: 0.2, ease: "power3.out" }
+            );
+
+            // General Reveal
+            const revealElements = document.querySelectorAll('.gsap-reveal');
+            revealElements.forEach(el => {
+                el.style.visibility = 'visible';
+                gsap.fromTo(el,
+                    { y: 60, opacity: 0 },
+                    {
+                        y: 0,
+                        opacity: 1,
+                        duration: 1,
+                        ease: "power3.out",
+                        scrollTrigger: {
+                            trigger: el,
+                            start: "top 85%",
+                        }
+                    }
+                );
+            });
+
+            // CountUp Animation
+            const syncOptions = { startVal: 50, duration: 2 };
+            const offlineOptions = { startVal: 0, duration: 2 };
+            const conflictOptions = { startVal: 100, duration: 2 };
+            
+            let syncCount = new countUp.CountUp('stat-sync', 0, syncOptions);
+            let offlineCount = new countUp.CountUp('stat-offline', 100, offlineOptions);
+            let conflictCount = new countUp.CountUp('stat-conflicts', 0, conflictOptions);
+
+            ScrollTrigger.create({
+                trigger: '#metrics',
+                start: "top 80%",
+                onEnter: () => {
+                    if (!syncCount.error) syncCount.start();
+                    if (!offlineCount.error) offlineCount.start();
+                    if (!conflictCount.error) conflictCount.start();
                 }
-                anim.innerHTML = `Network State: Synchronized`;
-                anim.style.color = 'var(--secondary)';
-            }, 800);
-        }
+            });
 
-        inputA.addEventListener('input', () => {
-            clock.A++;
-            updateClockDisplay();
-            syncState('A');
-        });
-
-        inputB.addEventListener('input', () => {
-            clock.B++;
-            updateClockDisplay();
-            syncState('B');
-        });
-
-        // Calculator Logic
-        const mauSlider = document.getElementById('mau-slider');
-        const updatesSlider = document.getElementById('updates-slider');
-        const mauVal = document.getElementById('mau-val');
-        const updatesVal = document.getElementById('updates-val');
-        const saasCost = document.getElementById('saas-cost');
-        const sfCost = document.getElementById('sf-cost');
-
-        function calcCosts() {
-            const mau = parseInt(mauSlider.value);
-            const updates = parseInt(updatesSlider.value);
+            // CRDT Demo Simulation
+            let valA = 0;
+            let valB = 0;
+            const elA = document.getElementById('valA');
+            const elB = document.getElementById('valB');
             
-            mauVal.textContent = mau.toLocaleString();
-            updatesVal.textContent = updates.toLocaleString();
+            setInterval(() => {
+                if (Math.random() > 0.5) {
+                    valA += Math.floor(Math.random() * 5);
+                    elA.innerText = valA;
+                } else {
+                    valB += Math.floor(Math.random() * 5);
+                    elB.innerText = valB;
+                }
+                
+                // Sync
+                if (Math.random() > 0.7) {
+                    const merged = Math.max(valA, valB);
+                    valA = merged;
+                    valB = merged;
+                    elA.innerText = valA;
+                    elB.innerText = valB;
+                    
+                    // Flash sync arrow
+                    gsap.to('.crdt-arrow', { backgroundColor: '#FF6B6B', duration: 0.2, yoyo: true, repeat: 1, onComplete: () => {
+                        gsap.set('.crdt-arrow', { backgroundColor: 'var(--tertiary)' });
+                    }});
+                }
+            }, 800);
 
-            // Fake cost formula for demo purposes
-            const readsWrites = mau * updates * 30; // monthly operations
-            const saas = (readsWrites / 100000) * 0.18; // approx firebase cost
-            const sf = 5 + (mau / 100000); // Fixed base VPS cost + tiny scale factor
+            // Code Tabs
+            const tabs = document.querySelectorAll('.code-tab');
+            const content = document.getElementById('code-content');
+            
+            const codes = {
+                'code-init': \`<pre><code><span class="token-keyword">import</span> { SyncForge } <span class="token-keyword">from</span> <span class="token-string">'@syncforge/core'</span>;
 
-            saasCost.textContent = Math.max(0, Math.round(saas)).toLocaleString();
-            sfCost.textContent = Math.max(5, Math.round(sf)).toLocaleString();
-        }
+<span class="token-keyword">const</span> db = <span class="token-keyword">new</span> <span class="token-function">SyncForge</span>({
+  name: <span class="token-string">'my-offline-db'</span>,
+  provider: <span class="token-string">'indexeddb'</span>
+});
 
-        mauSlider.addEventListener('input', calcCosts);
-        updatesSlider.addEventListener('input', calcCosts);
-        calcCosts();
+<span class="token-keyword">await</span> db.<span class="token-function">init</span>();
+<span class="token-keyword">console</span>.<span class="token-function">log</span>(<span class="token-string">'DB ready in 0ms'</span>);</code></pre>\`,
+                'code-put': \`<pre><code><span class="token-keyword">const</span> doc = db.<span class="token-function">collection</span>(<span class="token-string">'users'</span>).<span class="token-function">doc</span>(<span class="token-string">'u123'</span>);
 
-        // Tabs Logic
-        function switchTab(id) {
-            document.querySelectorAll('.tab-btn').forEach((el, i) => {
-                el.classList.toggle('active', i === id - 1);
+<span class="token-comment">// Writes are instant and available locally</span>
+<span class="token-keyword">await</span> doc.<span class="token-function">put</span>({
+  name: <span class="token-string">'Neo'</span>,
+  status: <span class="token-string">'offline'</span>
+});</code></pre>\`,
+                'code-sub': \`<pre><code><span class="token-keyword">const</span> query = db.<span class="token-function">collection</span>(<span class="token-string">'messages'</span>)
+  .<span class="token-function">where</span>(<span class="token-string">'roomId'</span>, <span class="token-string">'=='</span>, <span class="token-string">'matrix'</span>);
+
+query.<span class="token-function">subscribe</span>(docs => {
+  <span class="token-comment">// Automatically updates on local writes</span>
+  <span class="token-comment">// OR remote syncs via CRDT</span>
+  <span class="token-function">renderUI</span>(docs);
+});</code></pre>\`,
+                'code-sync': \`<pre><code><span class="token-keyword">import</span> { WebRTCProvider } <span class="token-keyword">from</span> <span class="token-string">'@syncforge/webrtc'</span>;
+
+<span class="token-keyword">const</span> sync = <span class="token-keyword">new</span> <span class="token-function">WebRTCProvider</span>(db, {
+  room: <span class="token-string">'app-global-state'</span>
+});
+
+sync.on(<span class="token-string">'synced'</span>, () => {
+  <span class="token-keyword">console</span>.<span class="token-function">log</span>(<span class="token-string">'Peers synchronized securely'</span>);
+});</code></pre>\`
+            };
+
+            tabs.forEach(tab => {
+                tab.addEventListener('click', () => {
+                    tabs.forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    const target = tab.getAttribute('data-target');
+                    
+                    content.innerHTML = codes[target];
+                    
+                    // Typewriter effect simulation
+                    const pre = content.querySelector('pre');
+                    gsap.fromTo(pre, {opacity: 0}, {opacity: 1, duration: 0.3});
+                });
             });
-            document.querySelectorAll('.tab-content').forEach((el, i) => {
-                el.classList.toggle('active', i === id - 1);
-            });
-        }
+        });
     </script>
 </body>
 </html>

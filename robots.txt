@@ -13,5 +13,4 @@ Allow: /
 User-agent: Google-Extended
 Allow: /
 
-User-agent: Bingbot
-Allow: /
+Sitemap: https://syncforge.dev/sitemap.xml
