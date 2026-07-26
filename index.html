@@ -550,10 +550,7 @@
             }
         }
         
-        .gsap-reveal {
-            opacity: 0;
-            visibility: hidden;
-        }
+        
     </style>
 </head>
 <body>
@@ -813,20 +810,17 @@
             // General Reveal
             const revealElements = document.querySelectorAll('.gsap-reveal');
             revealElements.forEach(el => {
-                el.style.visibility = 'visible';
-                gsap.fromTo(el,
-                    { y: 60, opacity: 0 },
-                    {
-                        y: 0,
-                        opacity: 1,
-                        duration: 1,
-                        ease: "power3.out",
-                        scrollTrigger: {
-                            trigger: el,
-                            start: "top 85%",
-                        }
-                    }
-                );
+                gsap.from(el, {
+                    scrollTrigger: {
+                        trigger: el,
+                        start: "top 88%",
+                        once: true
+                    },
+                    y: 40,
+                    opacity: 0,
+                    duration: 0.8,
+                    ease: "power3.out"
+                });
             });
 
             // CountUp Animation
