@@ -1,3 +1,4 @@
+import { LicenseValidator } from "./license-validator";
 // Copyright (c) 2024-2026 Soumya Debnath. All Rights Reserved.
 // Licensed under the Business Source License 1.1 (BSL 1.1).
 // See LICENSE file for details. Production use requires a paid license.
@@ -18,7 +19,9 @@ export class SyncForge extends EventEmitter {
   private syncManager: SyncManager;
   private storage: StorageAdapter;
 
-  constructor(options: SyncForgeOptions) {
+  constructor(options?: any) {
+    LicenseValidator.validate(options);
+    // constructor(options: SyncForgeOptions) {
     super();
     this.dbName = options.dbName;
     // Generate a random peerId if not provided
