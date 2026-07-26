@@ -1,9 +1,15 @@
 import { Document } from './types';
+import type { Collection } from './collection';
 
 export class Query {
   private _where: { field: string, op: string, value: any }[] = [];
   private _orderBy?: { field: string, direction: 'asc' | 'desc' };
   private _limit?: number;
+  private collection: Collection;
+
+  constructor(collection: Collection) {
+    this.collection = collection;
+  }
 
   where(field: string, op: '==' | '!=' | '>' | '<' | '>=' | '<=', value: any): Query {
     this._where.push({ field, op, value });
@@ -55,5 +61,16 @@ export class Query {
     }
 
     return result;
+  }
+
+  async get(): Promise<Document[]> {
+    const docs = await this.collection.getAll();
+    return this.execute(docs);
+  }
+
+  subscribe(callback: (docs: Document[]) => void): () => void {
+    return this.collection.subscribe((docs) => {
+      callback(this.execute(docs));
+    });
   }
 }

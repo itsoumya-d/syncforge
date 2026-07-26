@@ -70,15 +70,15 @@ export class Collection extends EventEmitter {
   }
 
   where(field: string, op: '==' | '!=' | '>' | '<' | '>=' | '<=', value: any): Query {
-    return new Query().where(field, op, value);
+    return new Query(this).where(field, op, value);
   }
 
   orderBy(field: string, direction: 'asc' | 'desc' = 'asc'): Query {
-    return new Query().orderBy(field, direction);
+    return new Query(this).orderBy(field, direction);
   }
 
   limit(n: number): Query {
-    return new Query().limit(n);
+    return new Query(this).limit(n);
   }
 
   subscribe(callback: (docs: Document[]) => void): () => void {
