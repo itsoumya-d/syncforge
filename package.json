@@ -1,0 +1,25 @@
+{
+  "name": "syncforge",
+  "version": "1.0.0",
+  "description": "CRDT-powered, local-first real-time database",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "crdt",
+    "local-first",
+    "database",
+    "webrtc",
+    "offline"
+  ],
+  "author": "",
+  "license": "AGPL-3.0",
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0"
+  }
+}
