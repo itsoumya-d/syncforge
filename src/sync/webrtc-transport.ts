@@ -36,7 +36,8 @@ export class WebRTCTransport extends EventEmitter {
     };
 
     this.ws.onmessage = async (event) => {
-      const message = JSON.parse(event.data);
+      let message;
+      try { message = JSON.parse(event.data); } catch { console.warn('SyncForge: Malformed WS message'); return; }
       if (message.type === 'peer-joined') {
         await this.handlePeerJoined(message.peerId);
       } else if (message.type === 'offer') {
@@ -141,9 +142,7 @@ export class WebRTCTransport extends EventEmitter {
     return pc.createDataChannel(label);
   }
 
-  createDataChannel(label: string) {
-    // Legacy API or generalized for manual creation
-  }
+
 
   private setupDataChannel(remotePeerId: string, dc: RTCDataChannel) {
     dc.binaryType = 'arraybuffer';
@@ -172,7 +171,11 @@ export class WebRTCTransport extends EventEmitter {
   send(data: ArrayBuffer | string) {
     for (const dc of this.dataChannels.values()) {
       if (dc.readyState === 'open') {
-        dc.send(data);
+        try {
+          dc.send(data);
+        } catch (e) {
+          console.warn('SyncForge: send error', e);
+        }
       }
     }
   }
