@@ -38,16 +38,20 @@ export class WebRTCTransport extends EventEmitter {
     this.ws.onmessage = async (event) => {
       let message;
       try { message = JSON.parse(event.data); } catch { console.warn('SyncForge: Malformed WS message'); return; }
-      if (message.type === 'peer-joined') {
-        await this.handlePeerJoined(message.peerId);
-      } else if (message.type === 'offer') {
-        await this.handleOffer(message.peerId, message.offer);
-      } else if (message.type === 'answer') {
-        await this.handleAnswer(message.peerId, message.answer);
-      } else if (message.type === 'ice-candidate') {
-        await this.handleIceCandidate(message.peerId, message.candidate);
-      } else if (message.type === 'peer-left') {
-        this.handlePeerLeft(message.peerId);
+      try {
+        if (message.type === 'peer-joined') {
+          await this.handlePeerJoined(message.peerId);
+        } else if (message.type === 'offer') {
+          await this.handleOffer(message.peerId, message.offer);
+        } else if (message.type === 'answer') {
+          await this.handleAnswer(message.peerId, message.answer);
+        } else if (message.type === 'ice-candidate') {
+          await this.handleIceCandidate(message.peerId, message.candidate);
+        } else if (message.type === 'peer-left') {
+          this.handlePeerLeft(message.peerId);
+        }
+      } catch (err) {
+        console.warn('SyncForge: Error handling signaling message', err);
       }
     };
 
@@ -77,6 +81,12 @@ export class WebRTCTransport extends EventEmitter {
   }
 
   private async handleOffer(remotePeerId: string, offer: RTCSessionDescriptionInit) {
+    // Close existing connection if present (prevents orphaned PeerConnections / memory leak)
+    const existingPc = this.peers.get(remotePeerId);
+    if (existingPc) {
+      try { existingPc.close(); } catch {}
+      this.peers.delete(remotePeerId);
+    }
     const pc = this.createPeerConnection(remotePeerId);
     
     pc.ondatachannel = (event) => {
