@@ -7,12 +7,29 @@ import { LWWRegister } from './lww-register';
 
 export class LWWMap {
   data: Map<string, LWWRegister<any>>;
+  private static readonly MAX_KEYS = 10000;
+  private static readonly MAX_FUTURE_DRIFT_MS = 60000; // 60s max drift allowed
 
   constructor() {
     this.data = new Map();
   }
 
+  private isTimestampValid(timestamp: number): boolean {
+    const now = Date.now();
+    // Prevent far-future timestamps (MAX_SAFE_INTEGER attack)
+    return timestamp <= now + LWWMap.MAX_FUTURE_DRIFT_MS && timestamp >= 0;
+  }
+
+  private sanitizeKey(key: string): boolean {
+    // Prevent prototype pollution
+    return key !== '__proto__' && key !== 'constructor' && key !== 'prototype';
+  }
+
   set(key: string, value: any, timestamp: number, peerId: string): void {
+    if (!this.sanitizeKey(key)) return;
+    if (!this.isTimestampValid(timestamp)) return;
+    if (!this.data.has(key) && this.data.size >= LWWMap.MAX_KEYS) return;
+
     if (!this.data.has(key)) {
       this.data.set(key, new LWWRegister(value, timestamp, peerId));
     } else {
@@ -21,13 +38,18 @@ export class LWWMap {
   }
 
   get(key: string): any {
+    if (!this.sanitizeKey(key)) return undefined;
     const reg = this.data.get(key);
     return reg ? reg.value : undefined;
   }
 
   delete(key: string, timestamp: number, peerId: string): void {
+    if (!this.sanitizeKey(key)) return;
+    if (!this.isTimestampValid(timestamp)) return;
+
     // Tombstone deletion
     if (!this.data.has(key)) {
+      if (this.data.size >= LWWMap.MAX_KEYS) return;
       this.data.set(key, new LWWRegister(null, timestamp, peerId));
     } else {
       this.data.get(key)!.set(null, timestamp, peerId);
@@ -45,11 +67,20 @@ export class LWWMap {
   }
 
   merge(other: LWWMap): void {
+    let mergedCount = 0;
     for (const [key, otherReg] of other.data.entries()) {
+      if (!this.sanitizeKey(key)) continue;
+      if (!this.isTimestampValid(otherReg.timestamp)) continue;
+      if (mergedCount >= LWWMap.MAX_KEYS) break; // State bomb mitigation
+
       if (!this.data.has(key)) {
-        this.data.set(key, new LWWRegister(otherReg.value, otherReg.timestamp, otherReg.peerId));
+        if (this.data.size < LWWMap.MAX_KEYS) {
+          this.data.set(key, new LWWRegister(otherReg.value, otherReg.timestamp, otherReg.peerId));
+          mergedCount++;
+        }
       } else {
         this.data.get(key)!.merge(otherReg);
+        mergedCount++;
       }
     }
   }
@@ -65,10 +96,26 @@ export class LWWMap {
 
   static fromBuffer(buffer: ArrayBuffer): LWWMap {
     const decoder = new TextDecoder();
-    const state = JSON.parse(decoder.decode(buffer));
     const map = new LWWMap();
-    for (const [key, regData] of Object.entries(state)) {
-      map.data.set(key, new LWWRegister((regData as any).value, (regData as any).timestamp, (regData as any).peerId));
+    try {
+      const jsonStr = decoder.decode(buffer);
+      const state = JSON.parse(jsonStr, (key, value) => {
+        if (key === '__proto__' || key === 'constructor' || key === 'prototype') return undefined;
+        return value;
+      });
+      if (state && typeof state === 'object') {
+        let count = 0;
+        for (const [key, regData] of Object.entries(state)) {
+          if (count >= LWWMap.MAX_KEYS) break;
+          if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
+          if (regData && typeof regData === 'object' && 'value' in regData && 'timestamp' in regData) {
+            map.set(key, (regData as any).value, Number((regData as any).timestamp) || 0, String((regData as any).peerId || ''));
+            count++;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('SyncForge: Failed to parse LWWMap buffer', e);
     }
     return map;
   }
@@ -83,3 +130,4 @@ export class LWWMap {
     return deltaMap;
   }
 }
+
