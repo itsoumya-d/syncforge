@@ -9,6 +9,8 @@ import { EventEmitter } from './events';
 import { SyncForge } from './syncforge';
 import { StorageAdapter } from './storage/types';
 import { SyncManager } from './sync/sync-manager';
+import { LWWMap } from './crdt/lww-map';
+import { PNCounter } from './crdt/pn-counter';
 
 export class Collection extends EventEmitter {
   private name: string;
@@ -145,19 +147,56 @@ export class Collection extends EventEmitter {
   }
 
   private async applyOperationLocally(op: any): Promise<void> {
-    const doc = await this.storage.get(this.name, op.docId) || {};
-    
+    const meta = await this.storage.get(`${this.name}_meta`, op.docId) || { mapData: {}, counterData: {} };
+
+    const map = new LWWMap();
+    if (meta.mapData) {
+      for (const [k, v] of Object.entries(meta.mapData)) {
+        map.set(k, (v as any).value, (v as any).timestamp, (v as any).peerId);
+      }
+    }
+
+    const counters: Record<string, PNCounter> = {};
+    if (meta.counterData) {
+      for (const [k, v] of Object.entries(meta.counterData)) {
+        counters[k] = new PNCounter((v as any).positives, (v as any).negatives);
+      }
+    }
+
     if (op.type === 'set') {
-      Object.assign(doc, op.value);
-      await this.storage.set(this.name, op.docId, doc);
+      for (const [k, v] of Object.entries(op.value || {})) {
+        map.set(k, v, op.timestamp, op.peerId);
+      }
     } else if (op.type === 'delete') {
-      await this.storage.delete(this.name, op.docId);
+      map.set('_deleted', true, op.timestamp, op.peerId);
     } else if (op.type === 'inc') {
-      doc[op.field] = (doc[op.field] || 0) + op.value;
-      await this.storage.set(this.name, op.docId, doc);
+      if (!counters[op.field]) counters[op.field] = new PNCounter();
+      counters[op.field].increment(op.peerId, op.value);
     } else if (op.type === 'dec') {
-      doc[op.field] = (doc[op.field] || 0) - op.value;
-      await this.storage.set(this.name, op.docId, doc);
+      if (!counters[op.field]) counters[op.field] = new PNCounter();
+      counters[op.field].decrement(op.peerId, op.value);
+    }
+
+    meta.mapData = {};
+    for (const [k, reg] of map.data.entries()) {
+      meta.mapData[k] = { value: reg.value, timestamp: reg.timestamp, peerId: reg.peerId };
+    }
+    
+    meta.counterData = {};
+    for (const [k, counter] of Object.entries(counters)) {
+      meta.counterData[k] = { positives: counter.positives.counts, negatives: counter.negatives.counts };
+    }
+    await this.storage.set(`${this.name}_meta`, op.docId, meta);
+
+    const docView = map.toJSON();
+    for (const [k, counter] of Object.entries(counters)) {
+      docView[k] = (docView[k] || 0) + counter.value;
+    }
+
+    if (docView._deleted) {
+      await this.storage.delete(this.name, op.docId);
+    } else {
+      await this.storage.set(this.name, op.docId, docView);
     }
 
     this.emit('change', op.docId);

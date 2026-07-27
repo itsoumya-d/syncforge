@@ -53,4 +53,33 @@ export class LWWMap {
       }
     }
   }
+
+  toBuffer(): ArrayBuffer {
+    const state: Record<string, any> = {};
+    for (const [key, reg] of this.data.entries()) {
+      state[key] = { value: reg.value, timestamp: reg.timestamp, peerId: reg.peerId };
+    }
+    const encoder = new TextEncoder();
+    return encoder.encode(JSON.stringify(state)).buffer;
+  }
+
+  static fromBuffer(buffer: ArrayBuffer): LWWMap {
+    const decoder = new TextDecoder();
+    const state = JSON.parse(decoder.decode(buffer));
+    const map = new LWWMap();
+    for (const [key, regData] of Object.entries(state)) {
+      map.data.set(key, new LWWRegister((regData as any).value, (regData as any).timestamp, (regData as any).peerId));
+    }
+    return map;
+  }
+
+  delta(sinceTimestamp: number): LWWMap {
+    const deltaMap = new LWWMap();
+    for (const [key, reg] of this.data.entries()) {
+      if (reg.timestamp > sinceTimestamp) {
+        deltaMap.data.set(key, new LWWRegister(reg.value, reg.timestamp, reg.peerId));
+      }
+    }
+    return deltaMap;
+  }
 }

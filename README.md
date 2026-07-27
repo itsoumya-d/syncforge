@@ -1,3 +1,10 @@
+<!--
+// Copyright (c) 2024-2026 Soumya Debnath. All Rights Reserved.
+// Licensed under the Business Source License 1.1 (BSL 1.1).
+// See LICENSE file for details. Production use requires a paid license.
+// Contact: soumyadebnath1661@gmail.com | +91 7031648617
+-->
+
 # SyncForge 🚀
 
 **The Local-First, Peer-to-Peer CRDT Database for the Modern Web**
@@ -12,19 +19,20 @@ SyncForge is a powerful, local-first database library designed to provide real-t
 ## Table of Contents
 1. [The Problem It Solves](#the-problem-it-solves)
 2. [Architecture](#architecture)
-3. [Quick Start](#quick-start)
-4. [Usage Examples](#usage-examples)
-5. [API Reference](#api-reference)
-6. [CRDT Types Explained](#crdt-types-explained)
-7. [How CRDTs Work](#how-crdts-work)
-8. [Comparison Table](#comparison-table)
-9. [Storage Adapters](#storage-adapters)
-10. [Security Model](#security-model)
-11. [Performance Benchmarks](#performance-benchmarks)
-12. [Deployment Guide](#deployment-guide)
-13. [Configuration Options](#configuration-options)
-14. [FAQ](#faq)
-15. [Author & License](#author--license)
+3. [Real-Time P2P & CRDT Engine](#-real-time-p2p--crdt-engine-research-backed)
+4. [Quick Start](#quick-start)
+5. [Usage Examples](#usage-examples)
+6. [API Reference](#api-reference)
+7. [CRDT Types Explained](#crdt-types-explained)
+8. [How CRDTs Work](#how-crdts-work)
+9. [Comparison Table](#comparison-table)
+10. [Storage Adapters](#storage-adapters)
+11. [Security Model](#security-model)
+12. [Performance Benchmarks](#performance-benchmarks)
+13. [Deployment Guide](#deployment-guide)
+14. [Configuration Options](#configuration-options)
+15. [FAQ](#faq)
+16. [Author & License](#author--license)
 
 ---
 
@@ -55,6 +63,40 @@ graph TD
 - **Local-First:** All CRUD operations hit the local storage adapter instantly.
 - **SyncManager:** Listens for local changes and queues them for broadcast.
 - **CRDT Resolution:** When a remote operation is received, CRDT mathematical properties guarantee that all peers converge on the same final state regardless of the order they receive the messages.
+
+---
+
+## 🔬 Real-Time P2P & CRDT Engine (Research-Backed)
+
+SyncForge combines state-of-the-art academic CRDT research with cutting-edge browser transport layers for zero-latency peer synchronization.
+
+### ⚡ Real-Time P2P Sync (WebRTC DataChannels + Binary Delta Compression)
+- **Direct P2P Mesh**: Low-latency DataChannels stream operations directly between connected peers.
+- **Binary Delta Compression**: State updates are delta-encoded and compressed using custom variable-length integer bit-packing and binary serialization protocols, dramatically reducing bandwidth usage across mesh networks.
+
+### 🔄 Advanced CRDT Integration & Serialization
+- **Convergence Guarantees**: Mathematically proven state convergence using `LWWMap` (Last-Writer-Wins Map merge), `PNCounter` (Positive-Negative Counter), and `ORSet` (Observed-Remove Set).
+- **Binary Serialization Protocol**: Zero-parse-overhead binary codec for CRDT operation logs, ensuring rapid encoding/decoding on main and worker threads alike.
+
+### 🔬 Research Foundation
+> **Research Citations:**  
+> - Kleppmann, M., Beresford, A. R. (2017). *A Conflict-Free Replicated JSON Datatype*. IEEE Transactions on Parallel and Distributed Systems, 28(10), 2733-2746. [arXiv:1608.03960](https://arxiv.org/abs/1608.03960)
+> - Toomim, M., et al. (2021). *Braid-HTTP: Synchronizing State across HTTP*. IETF Internet-Draft. [braid.org](https://braid.org)
+
+### 💻 Usage Example: P2P Binary Delta Sync & CRDT Merging
+```typescript
+import { SyncForge, LWWMap, PNCounter } from 'syncforge';
+
+const db = new SyncForge({ 
+  dbName: 'p2p-crdt-app',
+  binaryCompression: true // Enables WebRTC binary delta encoding
+});
+
+// Real-time P2P sync with CRDT merging
+db.connectPeer('wss://signaling.example.com');
+const docMap = new LWWMap();
+docMap.set('title', 'CRDT Paper', Date.now(), db.peerId);
+```
 
 ---
 
