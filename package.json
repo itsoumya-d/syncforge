@@ -31,7 +31,7 @@
     "offline"
   ],
   "author": "Soumya Debnath <soumyadebnath1661@gmail.com>",
-  "license": "BSL-1.1",
+  "license": "AGPL-3.0-or-later",
   "devDependencies": {
     "tsup": "^8.0.0",
     "typescript": "^5.0.0"
