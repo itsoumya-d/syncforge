@@ -1,7 +1,7 @@
 // Copyright (c) 2024-2026 Soumya Debnath. All Rights Reserved.
 // Licensed under the Business Source License 1.1 (BSL 1.1).
 // See LICENSE file for details. Production use requires a paid license.
-// Contact: soumyadebnath1661@gmail.com | +91 7031648617
+// Contact: soumyadebnath1661@gmail.com
 
 import { LWWRegister } from './lww-register';
 
@@ -28,7 +28,16 @@ export class LWWMap {
   set(key: string, value: any, timestamp: number, peerId: string): void {
     if (!this.sanitizeKey(key)) return;
     if (!this.isTimestampValid(timestamp)) return;
-    if (!this.data.has(key) && this.data.size >= LWWMap.MAX_KEYS) return;
+    if (!this.data.has(key) && this.data.size >= LWWMap.MAX_KEYS) {
+      // The cap is a state-bomb mitigation, but dropping a write silently means
+      // two replicas that learned keys in a different order keep different key
+      // sets and never reconverge. At minimum make it observable.
+      console.warn(
+        'SyncForge: LWWMap key limit (' + LWWMap.MAX_KEYS + ') reached; dropping key "' + key +
+        '". Replicas that reached the limit with a different key set will not converge.'
+      );
+      return;
+    }
 
     if (!this.data.has(key)) {
       this.data.set(key, new LWWRegister(value, timestamp, peerId));
@@ -67,20 +76,21 @@ export class LWWMap {
   }
 
   merge(other: LWWMap): void {
-    let mergedCount = 0;
     for (const [key, otherReg] of other.data.entries()) {
       if (!this.sanitizeKey(key)) continue;
       if (!this.isTimestampValid(otherReg.timestamp)) continue;
-      if (mergedCount >= LWWMap.MAX_KEYS) break; // State bomb mitigation
 
       if (!this.data.has(key)) {
+        // Growth is already bounded by MAX_KEYS below. The old code also
+        // counted *updates to existing keys* against the same budget and
+        // `break`-ed out of the loop, so merging a full 10 000-key map into a
+        // map that already had one key silently discarded a key even though
+        // updating an existing register cannot grow the state at all.
         if (this.data.size < LWWMap.MAX_KEYS) {
           this.data.set(key, new LWWRegister(otherReg.value, otherReg.timestamp, otherReg.peerId));
-          mergedCount++;
         }
       } else {
         this.data.get(key)!.merge(otherReg);
-        mergedCount++;
       }
     }
   }

@@ -2,7 +2,7 @@
 // Copyright (c) 2024-2026 Soumya Debnath. All Rights Reserved.
 // Licensed under the Business Source License 1.1 (BSL 1.1).
 // See LICENSE file for details. Production use requires a paid license.
-// Contact: soumyadebnath1661@gmail.com | +91 7031648617
+// Contact: soumyadebnath1661@gmail.com
 -->
 
 # SyncForge
@@ -132,15 +132,24 @@ const unsubDoc = todos.subscribeDoc('todo-1', (doc) => {
 });
 ```
 
-### 4. Offline Sync & P2P
+### 4. Offline Writes & P2P
 ```typescript
 // Writes are stored in IndexedDB while offline.
 await todos.set('todo-3', { title: 'Write code' });
 
-// Connect to a peer network.
-// SyncForge propagates offline changes automatically when reconnected.
+// Connect to a peer network. You must run the signaling server yourself.
 db.connectPeer('wss://signaling.yourserver.com');
 ```
+
+> **Offline writes are NOT replayed automatically.** There is no outbox. Operations
+> made while no peer data channel is open are persisted locally but are never
+> re-sent, and reconnecting peers do not reconcile vector clocks to find out what
+> they missed. To backfill, exchange snapshots explicitly:
+>
+> ```typescript
+> const snapshot = await db.exportData();   // JSON array of operations
+> await peerDb.importData(snapshot);        // idempotent — safe to replay
+> ```
 
 ---
 
@@ -150,8 +159,25 @@ db.connectPeer('wss://signaling.yourserver.com');
 
 - `constructor(options: { dbName: string; peerId?: string })` — initialises the database. If `peerId` is omitted, one is randomly generated.
 - `collection(name: string): Collection` — returns a Collection instance.
-- `connectPeer(signalingUrl: string): void` — connects to a signaling server to establish WebRTC connections.
+- `connectPeer(signalingUrl: string): void` — *starts* connecting to a signaling server. It is synchronous and returns nothing; connection success is reported via events, not by this call.
+- `isOnline(): boolean` — `true` only while at least one peer data channel is open.
 - `disconnect(): void` — disconnects from all peers.
+
+#### Connection events
+
+| Event | Meaning |
+|---|---|
+| `connecting` | `connectPeer()` was called |
+| `online` | the first peer data channel opened |
+| `offline` | the last peer data channel closed, or signaling failed permanently |
+| `peer-connected` / `peer-disconnected` | a specific peer's channel opened / closed |
+| `peer-unreachable` | ICE reached `failed` or `disconnected` for a peer — this is the symmetric/CGNAT case |
+| `ice-state` | every ICE connection-state transition, with the peer id |
+| `ice-candidate-error` | a STUN/TURN candidate could not be gathered |
+| `signaling-failed` | the signaling socket did not come up after 5 attempts (~31 s of backoff) |
+| `error` | signaling socket error, or any of the above surfaced as an `Error` |
+
+`peer-unreachable` is what distinguishes "network failure" from "peer left voluntarily"; `peer-disconnected` alone does not.
 - `exportData(): Promise<string>` — exports all stored operations as a JSON string.
 - `importData(json: string): Promise<void>` — imports data and applies it locally.
 
@@ -259,7 +285,17 @@ Measured on Node 24, Intel Xeon 2.90 GHz (2 cores), using `MemoryAdapter`:
 | `col.set()` | 22 ms | 0.022 ms |
 | `col.get()` | 2 ms | 0.002 ms |
 
-The README previously claimed "~1ms read, ~2ms write". Reads are actually faster (~0.002 ms each in the MemoryAdapter). These numbers are memory-only; IndexedDB writes in the browser will be slower. P2P sync latency is network-dependent and not measured here.
+These numbers are memory-only; IndexedDB writes in the browser will be slower. P2P sync latency is network-dependent and not measured here.
+
+**Read this caveat before trusting the table.** It measures 1000 writes across 1000 *distinct* documents, which is the fast path. Writes to a **single** document are O(n²), because each operation rebuilds that document's entire LWW map from stored metadata. Measured on the same machine:
+
+| Writes to one document | total | per op |
+|---|---|---|
+| 250 | 35 ms | 0.14 ms |
+| 1 000 | 370 ms | 0.37 ms |
+| 4 000 | 6 540 ms | 1.64 ms |
+
+Doubling the number of writes roughly quadruples the time. Collaborative editing of one shared document — the use case this library is for — is the slow path, not the fast one.
 
 ---
 
@@ -268,7 +304,7 @@ The README previously claimed "~1ms read, ~2ms write". Reads are actually faster
 | Feature | SyncForge | Firebase | Supabase | MongoDB | RxDB |
 |---|---|---|---|---|---|
 | **Architecture** | P2P Local-First | Cloud-First | Cloud-First | Cloud-First | Local-First |
-| **Cost** | **$0 infra** | High (Usage) | Medium | High | Free (Premium plugins) |
+| **Cost** | signaling + TURN only (no DB) | High (Usage) | Medium | High | Free (Premium plugins) |
 | **Offline Support** | Full | Partial | Partial | None | Full |
 | **Sync Mechanism** | WebRTC CRDTs | Centralized | Centralized | Centralized | CouchDB / GraphQL |
 | **Conflict Res** | Auto (CRDT) | Last-Write | Last-Write | Last-Write | Custom |
@@ -279,7 +315,8 @@ The README previously claimed "~1ms read, ~2ms write". Reads are actually faster
 
 - **E2E Encryption:** SyncForge does not encrypt data at rest or in transit. For sensitive data, encrypt payloads before calling `.set()`.
 - **Signaling Server:** The WebRTC signaling server only brokers connections; it does not see database contents.
-- **Validation:** Peers should validate incoming operations to prevent injection of unauthorised timestamps.
+- **Validation:** Peers should validate incoming operations to prevent injection of unauthorised timestamps. Inbound frames are length-checked and malformed frames are dropped with a warning, but operation *contents* are trusted.
+- **License key check:** `LicenseValidator` only emits a `console.warn`; its result is not enforced anywhere and any key beginning with `BSL11-` satisfies it. Treat it as a notice, not a control.
 
 ---
 
@@ -287,7 +324,10 @@ The README previously claimed "~1ms read, ~2ms write". Reads are actually faster
 
 - **Pre-release status.** Not on npm. No production adopters. API may change.
 - **No npm publication.** Running `npm install syncforge` installs an unrelated library. See Installation above.
-- **No TURN relay — connections fail behind symmetric or carrier-grade NAT.** The ICE configuration uses a single public STUN server (`stun:stun.l.google.com:19302`). STUN cannot traverse symmetric NAT (common on corporate networks) or many mobile carrier-grade NAT deployments. When ICE fails, the peer is reported as disconnected via the `peer-disconnected` event — there is no distinct "unreachable network" error. Callers cannot distinguish "NAT failure" from "peer left voluntarily". If you need reliable connectivity across arbitrary networks, configure your own TURN server.
+- **No TURN relay — connections fail behind symmetric or carrier-grade NAT.** The ICE configuration uses a single public STUN server (`stun:stun.l.google.com:19302`), and there is no `iceTransportPolicy` or `iceCandidatePoolSize` setting. STUN cannot traverse symmetric NAT (common on corporate networks) or many mobile carrier-grade NAT deployments. ICE failure is reported as `peer-unreachable` (with `reason: 'ice-failed'`) and as `ice-state`, so it *can* be told apart from a voluntary `peer-disconnected`. If you need reliable connectivity across arbitrary networks, configure your own TURN server. There is no connection timeout: nothing gives up on a peer whose ICE never completes, so apply your own deadline.
+- **A signaling server is required and is not provided.** `connectPeer()` needs a WebSocket endpoint speaking `join` / `peer-joined` / `offer` / `answer` / `ice-candidate` / `peer-left`, each carrying `peerId` and (for the routed types) `target`. No reference implementation ships with this repository.
+- **No dropped-operation recovery.** Delivery is whatever the data channel gives you. There is no anti-entropy protocol: if an operation is lost, replicas stay divergent until you resynchronise them yourself with `exportData()` / `importData()`. Duplicate delivery *is* safe — operations are deduplicated by id.
+- **`LWWMap` caps documents at 10 000 keys** as a state-bomb mitigation. Writes past the cap are dropped with a `console.warn`, and two replicas that reach the cap having learned different keys will not converge.
 - **Browser-only IndexedDB.** Node.js uses `MemoryAdapter` which is ephemeral.
 - **No authentication.** Any peer knowing your signaling room ID can join.
 - **Large binary files.** SyncForge is optimised for JSON documents. Store large blobs elsewhere and sync their URLs.
