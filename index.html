@@ -1,15 +1,22 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta name="keywords" content="free Firebase alternative, offline first CRDT database, local first database open source, P2P browser database sync, Supabase alternative, Firebase Realtime DB ($15K/mo), Supabase ($599/mo+), CouchDB, RxDB">
+    <meta name="keywords" content="CRDT database, local-first database, offline-first sync, peer-to-peer database sync, WebRTC DataChannel, Firebase alternative, Supabase alternative, RxDB alternative, conflict-free replicated data type">
     <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SyncForge | CRDT Local-First Real-Time Database</title>
-    <meta name="description" content="Your database. Offline-first. Conflict-free. SyncForge is an elite free alternative to Firebase and Supabase.">
+    <meta name="description" content="SyncForge is a CRDT-powered local-first database that syncs peer-to-peer over WebRTC DataChannels. Source-available under BSL 1.1; pre-release.">
+    <link rel="canonical" href="https://itsoumya-d.github.io/syncforge/">
+    <meta name="author" content="Soumya Debnath">
     <meta property="og:title" content="SyncForge | CRDT Local-First Database">
-    <meta property="og:description" content="0ms sync, 100% offline, 0 conflicts. The ultimate real-time local-first database powered by CRDTs.">
-    <meta name="twitter:card" content="summary_large_image">
+    <meta property="og:description" content="Local-first reads and writes with CRDT conflict resolution and peer-to-peer sync over WebRTC DataChannels.">
+    <meta property="og:url" content="https://itsoumya-d.github.io/syncforge/">
+    <meta property="og:site_name" content="SyncForge">
+    <!-- summary_large_image requires an image; no OG image asset exists in this repo. -->
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="SyncForge | CRDT Local-First Database">
+    <meta name="twitter:description" content="Local-first reads and writes with CRDT conflict resolution and peer-to-peer sync over WebRTC DataChannels.">
     
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -22,10 +29,12 @@
       "name": "SyncForge",
       "applicationCategory": "Database",
       "operatingSystem": "All",
+      "license": "https://mariadb.com/bsl11/",
       "offers": {
         "@type": "Offer",
-        "price": "0",
-        "priceCurrency": "USD"
+        "price": "399.00",
+        "priceCurrency": "USD",
+        "description": "Business Source License 1.1. Production use of any kind requires a paid commercial licence; tiers start at USD 399/year. Free for personal evaluation, academic research and contributions only."
       }
     }
     </script>
@@ -38,7 +47,7 @@
         "name": "Is SyncForge a free Firebase alternative?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "Yes, SyncForge is a high-performance local-first free alternative to Firebase and Supabase, providing real-time sync with 0 conflicts."
+          "text": "SyncForge is a local-first alternative to Firebase and Supabase, but it is source-available rather than free: it is licensed under the Business Source License 1.1 and any production use requires a paid commercial licence. It is free for personal evaluation, academic research and contributions. It removes the cloud database bill, but you still need to run a WebRTC signaling server (and a TURN relay for peers behind symmetric NAT)." 
         }
       }]
     }
@@ -731,7 +740,7 @@
 
         <!-- P2P Mesh Topology Diagram -->
         <section class="container" id="p2p-mesh">
-            <h2 class="gsap-reveal">WebRTC DataChannel Mesh — Zero Server Dependencies</h2>
+            <h2 class="gsap-reveal">WebRTC DataChannel Mesh — No Database Server</h2>
             <p class="gsap-reveal" style="margin-bottom: 48px;">Direct peer-to-peer connections eliminate server bottlenecks and reduce latency.</p>
             <div class="mesh-diagram gsap-reveal" style="position: relative; width: 100%; max-width: 600px; height: 400px; margin: 0 auto; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 16px; overflow: hidden;">
                 <style>
@@ -864,17 +873,17 @@
                 <div class="feature-card gsap-reveal">
                     <div class="feature-icon">✈️</div>
                     <h4>100% Offline</h4>
-                    <p>Full read/write capabilities disconnected. Syncs instantly upon reconnection.</p>
+                    <p>Full read/write capabilities while disconnected. Note that offline operations are not automatically replayed when a peer reconnects &mdash; use <code>exportData()</code>/<code>importData()</code> to backfill.</p>
                 </div>
                 <div class="feature-card gsap-reveal">
                     <div class="feature-icon">🔒</div>
-                    <h4>E2E Encryption</h4>
-                    <p>Data is encrypted at rest and in transit. Only clients hold the keys.</p>
+                    <h4>Bring Your Own Encryption</h4>
+                    <p>SyncForge does not encrypt data at rest or in transit. WebRTC DataChannels are DTLS-encrypted hop-to-hop; for confidentiality from peers, encrypt payloads before <code>.set()</code>.</p>
                 </div>
                 <div class="feature-card gsap-reveal">
                     <div class="feature-icon">🔄</div>
-                    <h4>Schema Migration</h4>
-                    <p>Painless versioning and schema migrations that just work, even in distributed systems.</p>
+                    <h4>Schemaless Documents</h4>
+                    <p>Documents are plain JSON objects with no declared schema. There is no migration tooling &mdash; version your own fields.</p>
                 </div>
             </div>
         </section>

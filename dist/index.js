@@ -37,33 +37,38 @@ __export(index_exports, {
 module.exports = __toCommonJS(index_exports);
 
 // src/license-validator.ts
-var LicenseValidator = class {
+var _LicenseValidator = class _LicenseValidator {
+  /**
+   * Read an environment variable without requiring @types/node.
+   * `tsc --noEmit` previously reported four TS2580 errors here because the file
+   * references the Node `process` global while tsconfig only includes DOM libs.
+   */
+  static env(name) {
+    const proc = globalThis.process;
+    const value = proc && proc.env ? proc.env[name] : void 0;
+    return typeof value === "string" ? value : void 0;
+  }
+  static hasProcess() {
+    return typeof globalThis.process !== "undefined";
+  }
   static validate(options) {
-    const key = options?.licenseKey || (typeof process !== "undefined" ? process.env.COMMERCIAL_LICENSE_KEY : void 0);
-    const isDev = typeof window !== "undefined" ? window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" : typeof process !== "undefined" && process.env.NODE_ENV !== "production";
+    const key = options?.licenseKey || _LicenseValidator.env("COMMERCIAL_LICENSE_KEY");
+    const isDev = typeof window !== "undefined" ? window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" : _LicenseValidator.hasProcess() && _LicenseValidator.env("NODE_ENV") !== "production";
     if (isDev || options?.allowEval) {
       return true;
     }
     if (!key || !key.startsWith("BSL11-")) {
-      console.warn(`
-================================================================================
-\u{1F512} COMMERCIAL USE WARNING \u2014 BUSINESS SOURCE LICENSE 1.1 REQUIRED
-Product: SYNCFORGE | Copyright (c) 2024-2026 Soumya Debnath
-
-Production use of this software requires a valid paid commercial license key.
-Unlicensed commercial deployment constitutes copyright infringement under DMCA \xA7 1201.
-
-Purchase a commercial license key:
-\u{1F4E7} Email: soumyadebnath1661@gmail.com | \u{1F4DE} Phone: +91 7031648617
-================================================================================
-      `);
+      console.warn(
+        "SyncForge: no commercial license key detected. Production use requires a paid license under the Business Source License 1.1. See COMMERCIAL_LICENSE.md or https://github.com/itsoumya-d/syncforge for terms. Set COMMERCIAL_LICENSE_KEY, or pass { allowEval: true } for evaluation use."
+      );
       return false;
     }
     return true;
   }
 };
-LicenseValidator.AUTHOR = "Soumya Debnath";
-LicenseValidator.CONTACT = "soumyadebnath1661@gmail.com";
+_LicenseValidator.AUTHOR = "Soumya Debnath";
+_LicenseValidator.CONTACT = "soumyadebnath1661@gmail.com";
+var LicenseValidator = _LicenseValidator;
 
 // src/query.ts
 var Query = class {
@@ -141,9 +146,25 @@ var EventEmitter = class {
     }
     this.listeners[event].push(callback);
   }
+  /**
+   * Notify listeners. Each listener is isolated: a listener that throws is
+   * reported and the remaining listeners still run.
+   *
+   * Previously a single throwing listener aborted the whole dispatch loop.
+   * Because `emit('change', ...)` is called synchronously from inside
+   * `Collection.applyOperationLocally`, one buggy application callback both
+   * starved every later subscriber and made an already-persisted `set()`
+   * reject — leaving the caller unable to tell whether the write landed.
+   */
   emit(event, ...args) {
-    if (this.listeners[event]) {
-      this.listeners[event].forEach((cb) => cb(...args));
+    const listeners = this.listeners[event];
+    if (!listeners) return;
+    for (const cb of listeners.slice()) {
+      try {
+        cb(...args);
+      } catch (err) {
+        console.error(`SyncForge: listener for "${event}" threw`, err);
+      }
     }
   }
   off(event, callback) {
@@ -154,17 +175,50 @@ var EventEmitter = class {
 };
 
 // src/crdt/lww-register.ts
-var LWWRegister = class {
+var LWWRegister = class _LWWRegister {
   constructor(value = null, timestamp = 0, peerId = "") {
     this.value = value;
     this.timestamp = timestamp;
     this.peerId = peerId;
   }
+  /**
+   * Apply a write, keeping the winner of a total order on
+   * (timestamp, peerId, value).
+   *
+   * The third level is required for convergence. With only (timestamp, peerId)
+   * the case "same timestamp, same peer, different value" was unordered, so the
+   * incumbent value was kept and `merge` stopped being commutative:
+   * merge(a,b) !== merge(b,a). That is reachable in ordinary use, because the
+   * documented usage passes `Date.now()` — a clock with 1 ms granularity — so
+   * any two writes by the same peer inside the same millisecond tie. Measured:
+   * 198 of 200 back-to-back writes were silently discarded, and two replicas
+   * that each kept a different survivor never reconverged.
+   *
+   * Note that ties are therefore resolved by value order, not by wall-clock
+   * arrival order. If you need "last write wins" between writes closer together
+   * than your clock's resolution, supply a monotonically increasing counter
+   * instead of `Date.now()` (this is what `Collection` does internally).
+   */
   set(value, timestamp, peerId) {
-    if (timestamp > this.timestamp || timestamp === this.timestamp && peerId > this.peerId) {
-      this.value = value;
-      this.timestamp = timestamp;
-      this.peerId = peerId;
+    if (!this.wins(value, timestamp, peerId)) return;
+    this.value = value;
+    this.timestamp = timestamp;
+    this.peerId = peerId;
+  }
+  wins(value, timestamp, peerId) {
+    if (timestamp !== this.timestamp) return timestamp > this.timestamp;
+    if (peerId !== this.peerId) return peerId > this.peerId;
+    const incoming = _LWWRegister.rank(value);
+    const current = _LWWRegister.rank(this.value);
+    return incoming > current;
+  }
+  /** Stable, order-independent key used only as the final tie-break. */
+  static rank(value) {
+    if (value === void 0) return "\0undefined";
+    try {
+      return JSON.stringify(value) ?? "\0" + String(value);
+    } catch {
+      return "\0" + String(value);
     }
   }
   merge(other) {
@@ -188,7 +242,12 @@ var _LWWMap = class _LWWMap {
   set(key, value, timestamp, peerId) {
     if (!this.sanitizeKey(key)) return;
     if (!this.isTimestampValid(timestamp)) return;
-    if (!this.data.has(key) && this.data.size >= _LWWMap.MAX_KEYS) return;
+    if (!this.data.has(key) && this.data.size >= _LWWMap.MAX_KEYS) {
+      console.warn(
+        "SyncForge: LWWMap key limit (" + _LWWMap.MAX_KEYS + ') reached; dropping key "' + key + '". Replicas that reached the limit with a different key set will not converge.'
+      );
+      return;
+    }
     if (!this.data.has(key)) {
       this.data.set(key, new LWWRegister(value, timestamp, peerId));
     } else {
@@ -220,19 +279,15 @@ var _LWWMap = class _LWWMap {
     return result;
   }
   merge(other) {
-    let mergedCount = 0;
     for (const [key, otherReg] of other.data.entries()) {
       if (!this.sanitizeKey(key)) continue;
       if (!this.isTimestampValid(otherReg.timestamp)) continue;
-      if (mergedCount >= _LWWMap.MAX_KEYS) break;
       if (!this.data.has(key)) {
         if (this.data.size < _LWWMap.MAX_KEYS) {
           this.data.set(key, new LWWRegister(otherReg.value, otherReg.timestamp, otherReg.peerId));
-          mergedCount++;
         }
       } else {
         this.data.get(key).merge(otherReg);
-        mergedCount++;
       }
     }
   }
@@ -324,20 +379,34 @@ var PNCounter = class {
 };
 
 // src/collection.ts
-var Collection = class extends EventEmitter {
+var Collection = class _Collection extends EventEmitter {
   constructor(name, db, storage, sync) {
     super();
+    /**
+     * Per-document serialisation chain.
+     *
+     * `applyOperationLocally` is a read-modify-write over the stored `_meta`
+     * record. Without serialisation two overlapping operations on the same
+     * document both read the same pre-state and the second write clobbers the
+     * first, so e.g. `Promise.all([col.increment(...) x10])` produced 1 instead
+     * of 10. Operations on the same document are now queued; operations on
+     * different documents still run concurrently.
+     */
+    this.applyQueues = /* @__PURE__ */ new Map();
     this.name = name;
     this.db = db;
     this.storage = storage;
     this.sync = sync;
-    this.sync.on("sync", async (op) => {
+    this.sync.on("sync", (op) => {
       if (op.collection === this.name) {
-        await this.applyOperationLocally(op);
+        this.applyOperationLocally(op).catch((err) => {
+          console.error("SyncForge: failed to apply remote operation", err);
+        });
       }
     });
   }
   async set(id, data) {
+    _Collection.assertSerialisable(data);
     const timestamp = this.sync.getVectorClock().increment();
     const op = {
       id: `${this.db.peerId}-${timestamp}`,
@@ -349,6 +418,7 @@ var Collection = class extends EventEmitter {
       timestamp,
       peerId: this.db.peerId
     };
+    this.sync.markApplied(op.id);
     await this.applyOperationLocally(op);
     await this.storage.saveOperation(op);
     this.sync.broadcast(op);
@@ -368,6 +438,7 @@ var Collection = class extends EventEmitter {
       timestamp,
       peerId: this.db.peerId
     };
+    this.sync.markApplied(op.id);
     await this.applyOperationLocally(op);
     await this.storage.saveOperation(op);
     this.sync.broadcast(op);
@@ -416,6 +487,7 @@ var Collection = class extends EventEmitter {
       timestamp,
       peerId: this.db.peerId
     };
+    this.sync.markApplied(op.id);
     await this.applyOperationLocally(op);
     await this.storage.saveOperation(op);
     this.sync.broadcast(op);
@@ -432,11 +504,37 @@ var Collection = class extends EventEmitter {
       timestamp,
       peerId: this.db.peerId
     };
+    this.sync.markApplied(op.id);
     await this.applyOperationLocally(op);
     await this.storage.saveOperation(op);
     this.sync.broadcast(op);
   }
-  async applyOperationLocally(op) {
+  /**
+   * Queue `op` behind any in-flight operation for the same document, so the
+   * read-modify-write below can never interleave with itself.
+   */
+  applyOperationLocally(op) {
+    const key = String(op && op.docId);
+    const previous = this.applyQueues.get(key) || Promise.resolve();
+    const next = previous.catch(() => {
+    }).then(() => this.applyOperationUnsafe(op));
+    this.applyQueues.set(key, next);
+    next.catch(() => {
+    }).then(() => {
+      if (this.applyQueues.get(key) === next) this.applyQueues.delete(key);
+    });
+    return next;
+  }
+  static assertSerialisable(data) {
+    try {
+      JSON.stringify(data);
+    } catch (err) {
+      throw new TypeError(
+        "SyncForge: document value is not JSON-serialisable (circular reference or BigInt). Nothing was written. Original error: " + (err instanceof Error ? err.message.split("\n")[0] : String(err))
+      );
+    }
+  }
+  async applyOperationUnsafe(op) {
     const meta = await this.storage.get(`${this.name}_meta`, op.docId) || { mapData: {}, counterData: {} };
     const map = new LWWMap();
     if (meta.mapData) {
@@ -454,6 +552,7 @@ var Collection = class extends EventEmitter {
       for (const [k, v] of Object.entries(op.value || {})) {
         map.set(k, v, op.timestamp, op.peerId);
       }
+      map.set("_deleted", false, op.timestamp, op.peerId);
     } else if (op.type === "delete") {
       map.set("_deleted", true, op.timestamp, op.peerId);
     } else if (op.type === "inc") {
@@ -476,7 +575,9 @@ var Collection = class extends EventEmitter {
     for (const [k, counter] of Object.entries(counters)) {
       docView[k] = (docView[k] || 0) + counter.value;
     }
-    if (docView._deleted) {
+    const isDeleted = docView._deleted === true;
+    delete docView._deleted;
+    if (isDeleted) {
       await this.storage.delete(this.name, op.docId);
     } else {
       await this.storage.set(this.name, op.docId, docView);
@@ -493,12 +594,31 @@ var VectorClock = class {
     this.localPeerId = localPeerId;
     this.clocks[localPeerId] = 0;
   }
+  /**
+   * Stamp a new local operation.
+   *
+   * This follows the Lamport send rule: the returned timestamp is strictly
+   * greater than every timestamp this replica has already observed, so a write
+   * that happens-after a remote operation always carries a higher timestamp
+   * than that operation.
+   *
+   * Previously this only incremented the local entry, which meant a replica
+   * that had made fewer writes than a peer produced timestamps *below* the
+   * timestamps it had already seen. Last-writer-wins then silently discarded
+   * the replica's own local write.
+   */
   increment() {
-    this.clocks[this.localPeerId] = (this.clocks[this.localPeerId] || 0) + 1;
+    let max = 0;
+    for (const value of Object.values(this.clocks)) {
+      if (value > max) max = value;
+    }
+    this.clocks[this.localPeerId] = max + 1;
     return this.clocks[this.localPeerId];
   }
   update(remoteClock) {
     for (const [peerId, timestamp] of Object.entries(remoteClock)) {
+      if (peerId === "__proto__" || peerId === "constructor" || peerId === "prototype") continue;
+      if (typeof timestamp !== "number" || !Number.isFinite(timestamp) || timestamp < 0) continue;
       this.clocks[peerId] = Math.max(this.clocks[peerId] || 0, timestamp);
     }
   }
@@ -530,10 +650,25 @@ var WebRTCTransport = class extends EventEmitter {
     this.connectWebSocket();
   }
   connectWebSocket() {
-    this.ws = new WebSocket(this.signalingUrl);
+    if (typeof WebSocket === "undefined") {
+      this.emit("error", new Error("SyncForge: no WebSocket implementation available in this environment"));
+      return;
+    }
+    try {
+      this.ws = new WebSocket(this.signalingUrl);
+    } catch (err) {
+      this.emit("error", err);
+      this.emit("signaling-failed", { url: this.signalingUrl, attempts: this.reconnectAttempts, cause: err });
+      return;
+    }
     this.ws.onopen = () => {
       this.reconnectAttempts = 0;
+      this.emit("signaling-open", this.signalingUrl);
       this.ws?.send(JSON.stringify({ type: "join", roomId: this.roomId, peerId: this.peerId }));
+    };
+    this.ws.onerror = (event) => {
+      this.emit("error", new Error("SyncForge: signaling socket error for " + this.signalingUrl));
+      void event;
     };
     this.ws.onmessage = async (event) => {
       let message;
@@ -560,10 +695,17 @@ var WebRTCTransport = class extends EventEmitter {
       }
     };
     this.ws.onclose = () => {
+      this.emit("signaling-closed", this.signalingUrl);
       if (this.reconnectAttempts < this.maxReconnectAttempts) {
         const backoff = Math.pow(2, this.reconnectAttempts) * 1e3;
         this.reconnectAttempts++;
         setTimeout(() => this.connectWebSocket(), backoff);
+      } else {
+        this.emit("signaling-failed", {
+          url: this.signalingUrl,
+          attempts: this.reconnectAttempts,
+          cause: new Error("SyncForge: signaling unreachable after " + this.reconnectAttempts + " attempts")
+        });
       }
     };
   }
@@ -627,6 +769,29 @@ var WebRTCTransport = class extends EventEmitter {
     const pc = new RTCPeerConnection({
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
     });
+    pc.oniceconnectionstatechange = () => {
+      const state = pc.iceConnectionState;
+      this.emit("ice-state", { peerId: remotePeerId, state });
+      if (state === "failed") {
+        this.emit("peer-unreachable", {
+          peerId: remotePeerId,
+          reason: "ice-failed",
+          hint: "No TURN relay is configured; symmetric/CGNAT peers cannot be reached over STUN alone."
+        });
+        this.dataChannels.delete(remotePeerId);
+        this.emit("peer-disconnected", remotePeerId);
+      } else if (state === "disconnected") {
+        this.emit("peer-unreachable", { peerId: remotePeerId, reason: "ice-disconnected" });
+      }
+    };
+    pc.onicecandidateerror = (event) => {
+      this.emit("ice-candidate-error", {
+        peerId: remotePeerId,
+        errorCode: event && event.errorCode,
+        errorText: event && event.errorText,
+        url: event && event.url
+      });
+    };
     pc.onicecandidate = (event) => {
       if (event.candidate) {
         this.ws?.send(JSON.stringify({
@@ -654,24 +819,45 @@ var WebRTCTransport = class extends EventEmitter {
       this.emit("peer-disconnected", remotePeerId);
     };
     dc.onmessage = (event) => {
-      if (this.messageHandler) {
+      if (!this.messageHandler) return;
+      try {
         this.messageHandler(event.data);
+      } catch (err) {
+        console.error("SyncForge: error handling peer message", err);
       }
     };
+  }
+  /** True when at least one peer data channel is open. */
+  hasOpenChannel() {
+    for (const dc of this.dataChannels.values()) {
+      if (dc.readyState === "open") return true;
+    }
+    return false;
   }
   onMessage(handler) {
     this.messageHandler = handler;
   }
+  /**
+   * Fan a frame out to every open data channel.
+   *
+   * Returns the number of peers the frame was actually handed to, so callers
+   * can tell "sent to nobody" apart from "sent". Previously this returned void
+   * and a write with no open channel was indistinguishable from a delivered one.
+   */
   send(data) {
+    let delivered = 0;
     for (const dc of this.dataChannels.values()) {
       if (dc.readyState === "open") {
         try {
-          dc.send(data);
+          if (typeof data === "string") dc.send(data);
+          else dc.send(data);
+          delivered++;
         } catch (e) {
           console.warn("SyncForge: send error", e);
         }
       }
     }
+    return delivered;
   }
   disconnect() {
     if (this.ws) {
@@ -687,35 +873,107 @@ var WebRTCTransport = class extends EventEmitter {
 };
 
 // src/sync/sync-manager.ts
-var SyncManager = class extends EventEmitter {
+var _SyncManager = class _SyncManager extends EventEmitter {
   constructor(peerId) {
     super();
     this.connected = false;
+    /**
+     * Operation ids already applied, for at-least-once delivery.
+     *
+     * `set`/`delete` are idempotent (last-writer-wins), but `inc`/`dec` are not:
+     * re-applying an increment adds the amount again. Without dedup, duplicate
+     * delivery (a retry, a resync, or `importData()` of a snapshot that overlaps
+     * the local log) permanently diverged counters between replicas.
+     *
+     * Bounded FIFO so a long-lived session cannot grow it without limit.
+     */
+    this.appliedOps = /* @__PURE__ */ new Set();
+    this.appliedOrder = [];
     this.peerId = peerId;
     this.vectorClock = new VectorClock(peerId);
     this.transport = new WebRTCTransport(peerId);
     this.transport.onMessage((data) => {
       this.handleRemoteData(data);
     });
+    this.transport.on("peer-connected", (peerId2) => {
+      const wasConnected = this.connected;
+      this.connected = true;
+      this.emit("peer-connected", peerId2);
+      if (!wasConnected) this.emit("online");
+    });
+    this.transport.on("peer-disconnected", (peerId2) => {
+      this.emit("peer-disconnected", peerId2);
+      if (!this.transport.hasOpenChannel()) {
+        if (this.connected) this.emit("offline");
+        this.connected = false;
+      }
+    });
+    this.transport.on("peer-unreachable", (info) => this.emit("peer-unreachable", info));
+    this.transport.on("ice-state", (info) => this.emit("ice-state", info));
+    this.transport.on("ice-candidate-error", (info) => this.emit("ice-candidate-error", info));
+    this.transport.on("error", (err) => this.emit("error", err));
+    this.transport.on("signaling-failed", (info) => {
+      if (this.connected) this.emit("offline");
+      this.connected = false;
+      this.emit("signaling-failed", info);
+      this.emit("error", info && info.cause || new Error("SyncForge: signaling unreachable"));
+    });
   }
+  /**
+   * Begin connecting.
+   *
+   * This does NOT mean the peer is online. `connect()` used to set
+   * `connected = true` and emit 'online' synchronously, before the signaling
+   * socket had even opened — so the caller was told it was online even when the
+   * host did not exist, and was never told otherwise. 'online' is now emitted
+   * when the first peer data channel actually opens, and 'offline' when the
+   * last one closes or signaling fails permanently.
+   */
   connect(signalingUrl, roomId = "default-room") {
+    this.emit("connecting", { signalingUrl, roomId });
     this.transport.connect(signalingUrl, roomId);
-    this.connected = true;
-    this.emit("online");
+  }
+  /** True only when at least one peer data channel is open. */
+  isConnected() {
+    return this.connected;
   }
   disconnect() {
     this.transport.disconnect();
     this.connected = false;
     this.emit("offline");
   }
+  /**
+   * Encode and fan out an operation.
+   *
+   * Returns the number of peers it reached. 0 means the operation exists only
+   * locally: there is no outbox, so it will NOT be retried or replayed when a
+   * peer later connects. Callers that need guaranteed propagation must track
+   * this themselves (see `exportData()` / `importData()`).
+   */
   broadcast(operation) {
-    if (!this.connected) return;
+    if (!this.connected) return 0;
     const encoder = new TextEncoder();
-    const clockBytes = encoder.encode(JSON.stringify(this.vectorClock.getClock()));
-    const typeBytes = encoder.encode(operation.type);
-    const collectionBytes = encoder.encode(operation.collection);
-    const docIdBytes = encoder.encode(operation.docId);
-    const dataBytes = encoder.encode(JSON.stringify(operation));
+    let clockBytes;
+    let typeBytes;
+    let collectionBytes;
+    let docIdBytes;
+    let dataBytes;
+    try {
+      clockBytes = encoder.encode(JSON.stringify(this.vectorClock.getClock()));
+      typeBytes = encoder.encode(operation.type);
+      collectionBytes = encoder.encode(operation.collection);
+      docIdBytes = encoder.encode(operation.docId);
+      dataBytes = encoder.encode(JSON.stringify(operation));
+    } catch (e) {
+      console.error("SyncForge: operation could not be serialised for broadcast", e);
+      return 0;
+    }
+    if (clockBytes.length > 65535 || typeBytes.length > 255 || collectionBytes.length > 65535 || docIdBytes.length > 65535) {
+      console.error(
+        "SyncForge: refusing to broadcast operation \u2014 a header field exceeds its wire limit (clock=" + clockBytes.length + "/65535, type=" + typeBytes.length + "/255, collection=" + collectionBytes.length + "/65535, docId=" + docIdBytes.length + "/65535). The write is stored locally but was not sent."
+      );
+      return 0;
+    }
     const buffer = new ArrayBuffer(2 + clockBytes.length + 1 + typeBytes.length + 2 + collectionBytes.length + 2 + docIdBytes.length + 4 + dataBytes.length);
     const view = new DataView(buffer);
     let offset = 0;
@@ -739,50 +997,115 @@ var SyncManager = class extends EventEmitter {
     offset += 4;
     new Uint8Array(buffer, offset, dataBytes.length).set(dataBytes);
     offset += dataBytes.length;
-    this.transport.send(buffer);
+    return this.transport.send(buffer);
   }
+  /**
+   * Decode an inbound frame.
+   *
+   * Every length field is attacker-controlled: a peer only needs the room id to
+   * send arbitrary bytes (there is no authentication). Previously the header
+   * parse sat *outside* the try/catch, so a 1-byte frame threw
+   * `RangeError: Offset is outside the bounds of the DataView` straight out of
+   * the data-channel `onmessage` handler, and a frame declaring a huge length
+   * threw `RangeError: Invalid typed array length`. Every read is now bounds
+   * checked against the real buffer length and the whole body is guarded.
+   */
   handleRemoteData(data) {
     if (typeof data === "string") return;
-    const view = new DataView(data);
-    let offset = 0;
-    const decoder = new TextDecoder();
-    const clockLen = view.getUint16(offset);
-    offset += 2;
-    const clockStr = decoder.decode(new Uint8Array(data, offset, clockLen));
-    offset += clockLen;
-    const typeLen = view.getUint8(offset);
-    offset += 1;
-    offset += typeLen;
-    const collectionLen = view.getUint16(offset);
-    offset += 2;
-    offset += collectionLen;
-    const docIdLen = view.getUint16(offset);
-    offset += 2;
-    offset += docIdLen;
-    const dataLen = view.getUint32(offset);
-    offset += 4;
-    const dataStr = decoder.decode(new Uint8Array(data, offset, dataLen));
-    offset += dataLen;
+    if (!data || typeof data.byteLength !== "number") return;
     try {
+      const total = data.byteLength;
+      const view = new DataView(data);
+      let offset = 0;
+      const decoder = new TextDecoder();
+      if (total < 11) {
+        console.warn("SyncForge: dropping truncated frame", total, "bytes");
+        return;
+      }
+      const need = (n) => {
+        if (n < 0 || offset + n > total) {
+          console.warn("SyncForge: dropping malformed frame (declared length exceeds payload)");
+          return false;
+        }
+        return true;
+      };
+      const clockLen = view.getUint16(offset);
+      offset += 2;
+      if (!need(clockLen)) return;
+      const clockStr = decoder.decode(new Uint8Array(data, offset, clockLen));
+      offset += clockLen;
+      if (!need(1)) return;
+      const typeLen = view.getUint8(offset);
+      offset += 1;
+      if (!need(typeLen)) return;
+      offset += typeLen;
+      if (!need(2)) return;
+      const collectionLen = view.getUint16(offset);
+      offset += 2;
+      if (!need(collectionLen)) return;
+      offset += collectionLen;
+      if (!need(2)) return;
+      const docIdLen = view.getUint16(offset);
+      offset += 2;
+      if (!need(docIdLen)) return;
+      offset += docIdLen;
+      if (!need(4)) return;
+      const dataLen = view.getUint32(offset);
+      offset += 4;
+      if (!need(dataLen)) return;
+      const dataStr = decoder.decode(new Uint8Array(data, offset, dataLen));
+      offset += dataLen;
       const clock = JSON.parse(clockStr);
       const operation = JSON.parse(dataStr);
-      this.vectorClock.update(clock);
+      if (clock && typeof clock === "object") this.vectorClock.update(clock);
       this.receive(operation);
     } catch (e) {
-      console.error("Failed to parse remote operation", e);
+      console.error("SyncForge: failed to parse remote operation", e);
     }
   }
   onRemoteOperation(callback) {
     this.on("sync", callback);
   }
+  /**
+   * Apply an operation received from a peer (or replayed from a snapshot).
+   *
+   * Duplicates are dropped by operation id so that at-least-once delivery is
+   * safe for the non-idempotent `inc`/`dec` operations.
+   */
   receive(operation) {
-    this.vectorClock.update({ [operation.peerId]: operation.timestamp });
+    if (!operation || typeof operation !== "object") return;
+    const id = operation.id;
+    if (typeof id === "string" && id.length > 0) {
+      if (this.appliedOps.has(id)) return;
+      this.appliedOps.add(id);
+      this.appliedOrder.push(id);
+      if (this.appliedOrder.length > _SyncManager.MAX_APPLIED_OPS) {
+        const evicted = this.appliedOrder.shift();
+        if (evicted !== void 0) this.appliedOps.delete(evicted);
+      }
+    }
+    if (typeof operation.peerId === "string" && typeof operation.timestamp === "number") {
+      this.vectorClock.update({ [operation.peerId]: operation.timestamp });
+    }
     this.emit("sync", operation);
+  }
+  /** Record a locally generated operation id so an echo of it is ignored. */
+  markApplied(operationId) {
+    if (typeof operationId !== "string" || operationId.length === 0) return;
+    if (this.appliedOps.has(operationId)) return;
+    this.appliedOps.add(operationId);
+    this.appliedOrder.push(operationId);
+    if (this.appliedOrder.length > _SyncManager.MAX_APPLIED_OPS) {
+      const evicted = this.appliedOrder.shift();
+      if (evicted !== void 0) this.appliedOps.delete(evicted);
+    }
   }
   getVectorClock() {
     return this.vectorClock;
   }
 };
+_SyncManager.MAX_APPLIED_OPS = 1e5;
+var SyncManager = _SyncManager;
 
 // src/storage/indexeddb-adapter.ts
 var IndexedDBAdapter = class {
@@ -890,26 +1213,41 @@ var IndexedDBAdapter = class {
 // src/storage/memory-adapter.ts
 var MemoryAdapter = class {
   constructor() {
-    this.collections = {};
+    /**
+     * Map-backed store.
+     *
+     * This used to be a plain object indexed by the collection name, so a
+     * collection called `__proto__` resolved `this.collections['__proto__']` to
+     * `Object.prototype` (truthy, so the initialiser was skipped) and the next
+     * line wrote a document straight onto `Object.prototype` — process-wide
+     * prototype pollution. A document id of `__proto__` likewise reassigned the
+     * collection object's prototype. `Map` keys cannot collide with prototype
+     * members, which closes both vectors.
+     */
+    this.collections = /* @__PURE__ */ new Map();
     this.operations = [];
   }
   async get(collection, id) {
-    return this.collections[collection]?.[id] || null;
+    const store = this.collections.get(collection);
+    if (!store) return null;
+    const value = store.get(id);
+    return value === void 0 ? null : value;
   }
   async set(collection, id, data) {
-    if (!this.collections[collection]) {
-      this.collections[collection] = {};
+    let store = this.collections.get(collection);
+    if (!store) {
+      store = /* @__PURE__ */ new Map();
+      this.collections.set(collection, store);
     }
-    this.collections[collection][id] = data;
+    store.set(id, data);
   }
   async delete(collection, id) {
-    if (this.collections[collection]) {
-      delete this.collections[collection][id];
-    }
+    this.collections.get(collection)?.delete(id);
   }
   async getAll(collection) {
-    if (!this.collections[collection]) return [];
-    return Object.values(this.collections[collection]);
+    const store = this.collections.get(collection);
+    if (!store) return [];
+    return Array.from(store.values());
   }
   async saveOperation(op) {
     this.operations.push(op);
@@ -925,6 +1263,15 @@ var SyncForge = class extends EventEmitter {
     LicenseValidator.validate(options);
     super();
     this.collections = /* @__PURE__ */ new Map();
+    if (options === null || typeof options !== "object" || Array.isArray(options)) {
+      throw new TypeError("SyncForge: options must be an object, e.g. new SyncForge({ dbName: 'my-app' })");
+    }
+    if (typeof options.dbName !== "string" || options.dbName.length === 0) {
+      throw new TypeError("SyncForge: options.dbName is required and must be a non-empty string");
+    }
+    if (options.peerId !== void 0 && (typeof options.peerId !== "string" || options.peerId.length === 0)) {
+      throw new TypeError("SyncForge: options.peerId must be a non-empty string when provided");
+    }
     this.dbName = options.dbName;
     this.peerId = options.peerId || Math.random().toString(36).substring(2, 9);
     if (typeof indexedDB !== "undefined") {
@@ -936,6 +1283,18 @@ var SyncForge = class extends EventEmitter {
     this.syncManager.on("online", () => this.emit("online"));
     this.syncManager.on("offline", () => this.emit("offline"));
     this.syncManager.on("sync", (op) => this.emit("sync", op));
+    this.syncManager.on("connecting", (info) => this.emit("connecting", info));
+    this.syncManager.on("peer-connected", (id) => this.emit("peer-connected", id));
+    this.syncManager.on("peer-disconnected", (id) => this.emit("peer-disconnected", id));
+    this.syncManager.on("peer-unreachable", (info) => this.emit("peer-unreachable", info));
+    this.syncManager.on("ice-state", (info) => this.emit("ice-state", info));
+    this.syncManager.on("ice-candidate-error", (info) => this.emit("ice-candidate-error", info));
+    this.syncManager.on("signaling-failed", (info) => this.emit("signaling-failed", info));
+    this.syncManager.on("error", (err) => this.emit("error", err));
+  }
+  /** True only when at least one peer data channel is open. */
+  isOnline() {
+    return this.syncManager.isConnected();
   }
   collection(name) {
     if (!this.collections.has(name)) {
@@ -953,22 +1312,32 @@ var SyncForge = class extends EventEmitter {
     const ops = await this.storage.getOperations();
     return JSON.stringify(ops);
   }
+  /**
+   * Replay an operation log produced by `exportData()`.
+   *
+   * Operations already applied are skipped by operation id, so importing the
+   * same snapshot twice is now a no-op. Previously every `inc`/`dec` in the
+   * snapshot was applied again, so `importData(await exportData())` silently
+   * doubled every counter in the database.
+   */
   async importData(json) {
+    let ops;
     try {
-      const ops = JSON.parse(json);
-      if (Array.isArray(ops)) {
-        for (const op of ops) {
-          this.syncManager.receive(op);
-        }
-      }
+      ops = JSON.parse(json);
     } catch (e) {
-      console.error("Failed to import data:", e);
+      throw new SyntaxError("SyncForge: importData received invalid JSON: " + (e instanceof Error ? e.message : String(e)));
+    }
+    if (!Array.isArray(ops)) {
+      throw new TypeError("SyncForge: importData expects a JSON array of operations");
+    }
+    for (const op of ops) {
+      this.syncManager.receive(op);
     }
   }
 };
 
 // src/crdt/or-set.ts
-var ORSet = class {
+var ORSet = class _ORSet {
   constructor() {
     this.added = /* @__PURE__ */ new Map();
     this.removed = /* @__PURE__ */ new Set();
@@ -992,14 +1361,43 @@ var ORSet = class {
     }
     return false;
   }
+  /**
+   * Merge another replica's state into this one.
+   *
+   * A tag is supposed to identify a single add event, so the value bound to a
+   * tag should be immutable. Nothing enforces that, and this used to blindly
+   * overwrite: if two replicas bound the same tag to different values, then
+   * `A.merge(B)` and `B.merge(A)` produced different results and the replicas
+   * never reconverged. (Property test counterexample: A={t1:'apple'},
+   * B={t1:'banana'} -> ['banana'] vs ['apple'].)
+   *
+   * Conflicting bindings are now resolved by a deterministic total order on the
+   * serialised value, which makes merge commutative and associative regardless
+   * of how the tags were generated.
+   */
   merge(other) {
     for (const id of other.removed) {
       this.remove(id);
     }
     for (const [id, value] of other.added.entries()) {
-      if (!this.removed.has(id)) {
+      if (this.removed.has(id)) continue;
+      if (!this.added.has(id)) {
+        this.added.set(id, value);
+        continue;
+      }
+      const mine = this.added.get(id);
+      if (mine === value) continue;
+      if (_ORSet.rank(value) < _ORSet.rank(mine)) {
         this.added.set(id, value);
       }
+    }
+  }
+  /** Stable, order-independent key used only to break tag-collision ties. */
+  static rank(value) {
+    try {
+      return JSON.stringify(value) ?? String(value);
+    } catch {
+      return String(value);
     }
   }
 };

@@ -1,7 +1,7 @@
 // Copyright (c) 2024-2026 Soumya Debnath. All Rights Reserved.
 // Licensed under the Business Source License 1.1 (BSL 1.1).
 // See LICENSE file for details. Production use requires a paid license.
-// Contact: soumyadebnath1661@gmail.com | +91 7031648617
+// Contact: soumyadebnath1661@gmail.com
 
 import { EventEmitter } from '../events';
 
@@ -28,11 +28,30 @@ export class WebRTCTransport extends EventEmitter {
   }
 
   private connectWebSocket() {
-    this.ws = new WebSocket(this.signalingUrl);
-    
+    if (typeof WebSocket === 'undefined') {
+      this.emit('error', new Error('SyncForge: no WebSocket implementation available in this environment'));
+      return;
+    }
+    try {
+      this.ws = new WebSocket(this.signalingUrl);
+    } catch (err) {
+      // e.g. an invalid or non-ws: URL throws synchronously.
+      this.emit('error', err);
+      this.emit('signaling-failed', { url: this.signalingUrl, attempts: this.reconnectAttempts, cause: err });
+      return;
+    }
+
     this.ws.onopen = () => {
       this.reconnectAttempts = 0;
+      this.emit('signaling-open', this.signalingUrl);
       this.ws?.send(JSON.stringify({ type: 'join', roomId: this.roomId, peerId: this.peerId }));
+    };
+
+    // Previously no onerror handler was installed at all, so a refused or
+    // unresolvable signaling host produced no observable signal whatsoever.
+    this.ws.onerror = (event: any) => {
+      this.emit('error', new Error('SyncForge: signaling socket error for ' + this.signalingUrl));
+      void event;
     };
 
     this.ws.onmessage = async (event) => {
@@ -56,10 +75,20 @@ export class WebRTCTransport extends EventEmitter {
     };
 
     this.ws.onclose = () => {
+      this.emit('signaling-closed', this.signalingUrl);
       if (this.reconnectAttempts < this.maxReconnectAttempts) {
         const backoff = Math.pow(2, this.reconnectAttempts) * 1000;
         this.reconnectAttempts++;
         setTimeout(() => this.connectWebSocket(), backoff);
+      } else {
+        // The reconnect budget (5 attempts, ~31 s) is exhausted. Previously the
+        // transport gave up silently and the caller was left believing it was
+        // still online forever.
+        this.emit('signaling-failed', {
+          url: this.signalingUrl,
+          attempts: this.reconnectAttempts,
+          cause: new Error('SyncForge: signaling unreachable after ' + this.reconnectAttempts + ' attempts')
+        });
       }
     };
   }
@@ -133,6 +162,34 @@ export class WebRTCTransport extends EventEmitter {
       iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
     });
 
+    // Surface ICE failure. Without a TURN relay, symmetric and carrier-grade
+    // NAT will reach 'failed' and no data channel will ever open; previously
+    // that produced no event at any layer.
+    pc.oniceconnectionstatechange = () => {
+      const state = pc.iceConnectionState;
+      this.emit('ice-state', { peerId: remotePeerId, state });
+      if (state === 'failed') {
+        this.emit('peer-unreachable', {
+          peerId: remotePeerId,
+          reason: 'ice-failed',
+          hint: 'No TURN relay is configured; symmetric/CGNAT peers cannot be reached over STUN alone.'
+        });
+        this.dataChannels.delete(remotePeerId);
+        this.emit('peer-disconnected', remotePeerId);
+      } else if (state === 'disconnected') {
+        this.emit('peer-unreachable', { peerId: remotePeerId, reason: 'ice-disconnected' });
+      }
+    };
+
+    pc.onicecandidateerror = (event: any) => {
+      this.emit('ice-candidate-error', {
+        peerId: remotePeerId,
+        errorCode: event && event.errorCode,
+        errorText: event && event.errorText,
+        url: event && event.url
+      });
+    };
+
     pc.onicecandidate = (event) => {
       if (event.candidate) {
         this.ws?.send(JSON.stringify({
@@ -168,26 +225,50 @@ export class WebRTCTransport extends EventEmitter {
     };
 
     dc.onmessage = (event) => {
-      if (this.messageHandler) {
+      if (!this.messageHandler) return;
+      // A malformed frame from a peer must not escape as an uncaught exception
+      // in the event handler.
+      try {
         this.messageHandler(event.data);
+      } catch (err) {
+        console.error('SyncForge: error handling peer message', err);
       }
     };
+  }
+
+  /** True when at least one peer data channel is open. */
+  hasOpenChannel(): boolean {
+    for (const dc of this.dataChannels.values()) {
+      if (dc.readyState === 'open') return true;
+    }
+    return false;
   }
 
   onMessage(handler: (data: ArrayBuffer | string) => void) {
     this.messageHandler = handler;
   }
 
-  send(data: ArrayBuffer | string) {
+  /**
+   * Fan a frame out to every open data channel.
+   *
+   * Returns the number of peers the frame was actually handed to, so callers
+   * can tell "sent to nobody" apart from "sent". Previously this returned void
+   * and a write with no open channel was indistinguishable from a delivered one.
+   */
+  send(data: ArrayBuffer | string): number {
+    let delivered = 0;
     for (const dc of this.dataChannels.values()) {
       if (dc.readyState === 'open') {
         try {
-          dc.send(data);
+          if (typeof data === 'string') dc.send(data);
+          else dc.send(data);
+          delivered++;
         } catch (e) {
           console.warn('SyncForge: send error', e);
         }
       }
     }
+    return delivered;
   }
 
   disconnect() {

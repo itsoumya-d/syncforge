@@ -1,7 +1,7 @@
 // Copyright (c) 2024-2026 Soumya Debnath. All Rights Reserved.
 // Licensed under the Business Source License 1.1 (BSL 1.1).
 // See LICENSE file for details. Production use requires a paid license.
-// Contact: soumyadebnath1661@gmail.com | +91 7031648617
+// Contact: soumyadebnath1661@gmail.com
 
 import { Document } from './types';
 import { Query } from './query';
@@ -17,6 +17,17 @@ export class Collection extends EventEmitter {
   private db: SyncForge;
   private storage: StorageAdapter;
   private sync: SyncManager;
+  /**
+   * Per-document serialisation chain.
+   *
+   * `applyOperationLocally` is a read-modify-write over the stored `_meta`
+   * record. Without serialisation two overlapping operations on the same
+   * document both read the same pre-state and the second write clobbers the
+   * first, so e.g. `Promise.all([col.increment(...) x10])` produced 1 instead
+   * of 10. Operations on the same document are now queued; operations on
+   * different documents still run concurrently.
+   */
+  private applyQueues: Map<string, Promise<void>> = new Map();
 
   constructor(name: string, db: SyncForge, storage: StorageAdapter, sync: SyncManager) {
     super();
@@ -25,14 +36,24 @@ export class Collection extends EventEmitter {
     this.storage = storage;
     this.sync = sync;
 
-    this.sync.on('sync', async (op: any) => {
+    this.sync.on('sync', (op: any) => {
       if (op.collection === this.name) {
-        await this.applyOperationLocally(op);
+        // Fire-and-forget by design (EventEmitter is synchronous), but errors
+        // must not become unhandled rejections.
+        this.applyOperationLocally(op).catch((err) => {
+          console.error('SyncForge: failed to apply remote operation', err);
+        });
       }
     });
   }
 
   async set(id: string, data: object): Promise<void> {
+    // A value containing a cycle (or a BigInt) cannot be broadcast or exported.
+    // Previously such a value was applied and persisted, then JSON.stringify
+    // threw: `broadcast()` rejected the already-committed set(), and
+    // `exportData()` stayed permanently broken because the poisoned operation
+    // could not be removed. Fail fast instead, before mutating any state.
+    Collection.assertSerialisable(data);
     const timestamp = this.sync.getVectorClock().increment();
     const op = {
       id: `${this.db.peerId}-${timestamp}`,
@@ -45,6 +66,7 @@ export class Collection extends EventEmitter {
       peerId: this.db.peerId
     };
     
+    this.sync.markApplied(op.id);
     await this.applyOperationLocally(op);
     await this.storage.saveOperation(op);
     this.sync.broadcast(op);
@@ -67,6 +89,7 @@ export class Collection extends EventEmitter {
       peerId: this.db.peerId
     };
     
+    this.sync.markApplied(op.id);
     await this.applyOperationLocally(op);
     await this.storage.saveOperation(op);
     this.sync.broadcast(op);
@@ -123,6 +146,7 @@ export class Collection extends EventEmitter {
       peerId: this.db.peerId
     };
     
+    this.sync.markApplied(op.id);
     await this.applyOperationLocally(op);
     await this.storage.saveOperation(op);
     this.sync.broadcast(op);
@@ -141,12 +165,42 @@ export class Collection extends EventEmitter {
       peerId: this.db.peerId
     };
     
+    this.sync.markApplied(op.id);
     await this.applyOperationLocally(op);
     await this.storage.saveOperation(op);
     this.sync.broadcast(op);
   }
 
-  private async applyOperationLocally(op: any): Promise<void> {
+  /**
+   * Queue `op` behind any in-flight operation for the same document, so the
+   * read-modify-write below can never interleave with itself.
+   */
+  private applyOperationLocally(op: any): Promise<void> {
+    const key = String(op && op.docId);
+    const previous = this.applyQueues.get(key) || Promise.resolve();
+    const next = previous
+      .catch(() => { /* a failed predecessor must not block the queue */ })
+      .then(() => this.applyOperationUnsafe(op));
+    this.applyQueues.set(key, next);
+    // Drop the chain once it drains so the map does not grow without bound.
+    next.catch(() => {}).then(() => {
+      if (this.applyQueues.get(key) === next) this.applyQueues.delete(key);
+    });
+    return next;
+  }
+
+  private static assertSerialisable(data: unknown): void {
+    try {
+      JSON.stringify(data);
+    } catch (err) {
+      throw new TypeError(
+        'SyncForge: document value is not JSON-serialisable (circular reference or BigInt). ' +
+        'Nothing was written. Original error: ' + (err instanceof Error ? err.message.split('\n')[0] : String(err))
+      );
+    }
+  }
+
+  private async applyOperationUnsafe(op: any): Promise<void> {
     const meta = await this.storage.get(`${this.name}_meta`, op.docId) || { mapData: {}, counterData: {} };
 
     const map = new LWWMap();
@@ -167,6 +221,12 @@ export class Collection extends EventEmitter {
       for (const [k, v] of Object.entries(op.value || {})) {
         map.set(k, v, op.timestamp, op.peerId);
       }
+      // Clear any tombstone. `_deleted` is an ordinary LWW register, so a set
+      // that happens-after a delete resurrects the document and a set that
+      // happens-before it correctly loses. Previously `_deleted` was only ever
+      // set to true, which made deletion permanent: a later set() resolved
+      // successfully but get() returned null forever.
+      map.set('_deleted', false, op.timestamp, op.peerId);
     } else if (op.type === 'delete') {
       map.set('_deleted', true, op.timestamp, op.peerId);
     } else if (op.type === 'inc') {
@@ -193,7 +253,11 @@ export class Collection extends EventEmitter {
       docView[k] = (docView[k] || 0) + counter.value;
     }
 
-    if (docView._deleted) {
+    // `_deleted` is internal bookkeeping and must not leak into user documents.
+    const isDeleted = docView._deleted === true;
+    delete docView._deleted;
+
+    if (isDeleted) {
       await this.storage.delete(this.name, op.docId);
     } else {
       await this.storage.set(this.name, op.docId, docView);

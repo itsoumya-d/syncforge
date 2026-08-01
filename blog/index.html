@@ -5,12 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Under the Hood of SyncForge: High-Throughput CRDT State Synchronization Over WebRTC DataChannels</title>
     <meta name="description" content="A deep dive into SyncForge's architecture: LWWMap, Vector Clocks, binary delta serialization, WebRTC signaling, and a cost comparison against Firebase.">
-    <meta name="keywords" content="free Algolia alternative, zero server authentication, WebGPU LLM in browser, SyncForge, CRDT, WebRTC, Firebase alternative, Supabase alternative, local-first database">
+    <meta name="keywords" content="SyncForge, CRDT, conflict-free replicated data type, LWW map, PN counter, vector clock, WebRTC DataChannel, local-first database, offline-first sync, peer-to-peer sync">
+    <link rel="canonical" href="https://itsoumya-d.github.io/syncforge/blog/index.html">
+    <meta name="author" content="Soumya Debnath">
     
     <meta property="og:title" content="Under the Hood of SyncForge: High-Throughput CRDT State Synchronization">
     <meta property="og:description" content="Explore the engineering architecture behind SyncForge, focusing on CRDTs and P2P synchronization via WebRTC.">
     <meta property="og:type" content="article">
-    <meta name="twitter:card" content="summary_large_image">
+    <meta property="og:url" content="https://itsoumya-d.github.io/syncforge/blog/index.html">
+    <meta property="og:site_name" content="SyncForge">
+    <!-- summary_large_image requires an image; no OG image asset exists in this repo, so declare the card type that actually renders. -->
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="Under the Hood of SyncForge: High-Throughput CRDT State Synchronization">
+    <meta name="twitter:description" content="Explore the engineering architecture behind SyncForge, focusing on CRDTs and P2P synchronization via WebRTC.">
     
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -227,7 +234,7 @@
         <ol>
             <li><strong>Latency</strong>: Every operation requires a round-trip to the server.</li>
             <li><strong>Offline Degradation</strong>: If a user goes offline, they either can't write, or their writes are queued and blindly applied when they reconnect, often overwriting others' data.</li>
-            <li><strong>Cost</strong>: You pay for every read, write, and megabyte of bandwidth. At scale, this can cost tens of thousands of dollars per month ($15K+ for 10M ops).</li>
+            <li><strong>Cost</strong>: You pay for every read, write, and megabyte of bandwidth. Cost therefore scales with traffic rather than with the number of user devices. (Figures vary by provider and plan; check current pricing rather than trusting a number in a blog post.)</li>
         </ol>
 
         <h2>Enter CRDTs (Conflict-Free Replicated Data Types)</h2>
@@ -248,14 +255,17 @@
   "clientC": 42
 }</code></pre>
 
-        <p>When a client receives a state update, it checks the attached vector clock. If the update is from the past, it's ignored. If it's causally disconnected (a concurrent edit), the CRDT merge rules seamlessly combine them.</p>
+        <p>When a client receives an operation it folds the attached clock into its own with a per-entry maximum, and stamps its next local write above everything it has seen (the Lamport send rule), so a write can never carry a timestamp below an operation it happens-after. Operations are not gated on causality &mdash; every operation is applied and the CRDT merge rules reconcile concurrent edits. Duplicates are suppressed by operation id, which matters because <code>inc</code>/<code>dec</code> are not idempotent.</p>
 
-        <h2>Binary Delta Serialization</h2>
-        <p>Sending the entire state over the network for every change is inefficient. SyncForge computes state deltas—only the changes made since the last sync. These deltas are serialized into a highly compact binary format using a custom schema protocol, minimizing payload size to just bytes.</p>
+        <h2>Wire Format</h2>
+        <p>Each operation is framed as a length-prefixed binary envelope: the sender's vector clock, then the operation type, collection and document id as separate fields, then the operation itself as JSON.</p>
+        <p>Two honest caveats about this format. First, <strong>it sends whole operations, not state deltas</strong>: <code>LWWMap</code> does expose <code>delta(sinceTimestamp)</code>, <code>toBuffer()</code> and <code>fromBuffer()</code>, but nothing in the sync path calls them today &mdash; they are there for callers who want to build their own delta exchange on top. Second, <strong>the envelope is currently larger than the JSON it wraps</strong>: type, collection and document id are written into the header <em>and</em> repeated inside the JSON body, and the receiver discards the header copies. For a small document (36-byte payload, 154-byte operation) the frame measures 190 bytes, about 23% overhead. Deduplicating those fields is a straightforward improvement that has not been made yet.</p>
 
         <h2>WebRTC Signaling & Reconnection</h2>
         <p>SyncForge leverages WebRTC DataChannels for peer-to-peer data transfer, bypassing the need for a relay server.</p>
-        <p>However, WebRTC requires a signaling mechanism to establish the initial connection (exchanging SDP offers/answers). SyncForge provides a lightweight, pluggable signaling interface. Once the peer connection is established, the signaling server drops out of the loop. If a connection drops, the SyncForge engine buffers state changes locally in IndexedDB and automatically re-exchanges vector clocks upon reconnection to compute the missing deltas.</p>
+        <p>However, WebRTC requires a signaling mechanism to establish the initial connection (exchanging SDP offers/answers). SyncForge speaks a small JSON protocol over a WebSocket for this &mdash; <code>join</code>, <code>peer-joined</code>, <code>offer</code>, <code>answer</code>, <code>ice-candidate</code>, <code>peer-left</code>, with a <code>target</code> field for routing. <strong>You must run that server yourself; SyncForge does not ship one.</strong> Once the peer connection is established the signaling server drops out of the data path.</p>
+        <p><strong>There is no outbox, and no anti-entropy on reconnect.</strong> Operations written while no peer channel is open are persisted locally but are <em>not</em> queued for later transmission, and reconnecting peers do not compare vector clocks to discover what they missed. <code>broadcast()</code> returns the number of peers a frame actually reached, so a caller can detect <code>0</code> and arrange its own backfill with <code>exportData()</code> / <code>importData()</code>, but SyncForge will not do it automatically. A dropped operation stays dropped.</p>
+        <p>Note also that without a TURN relay, ICE will reach <code>failed</code> for peers behind symmetric or carrier-grade NAT. That is now observable: subscribe to <code>peer-unreachable</code>, <code>ice-state</code>, <code>signaling-failed</code> and <code>error</code> on the database instance.</p>
 
         <h2>Benchmark & Cost Analysis</h2>
         <table>
@@ -276,9 +286,9 @@
                 </tr>
                 <tr>
                     <td><strong>Write Latency</strong></td>
-                    <td>50-150ms</td>
-                    <td>30-100ms</td>
-                    <td><strong>&lt; 1ms</strong> (Local)</td>
+                    <td>network round trip</td>
+                    <td>network round trip</td>
+                    <td>local write, no round trip</td>
                 </tr>
                 <tr>
                     <td><strong>Offline Writes</strong></td>
@@ -288,9 +298,9 @@
                 </tr>
                 <tr>
                     <td><strong>Cost (10M Ops/mo)</strong></td>
-                    <td>~$15,000+</td>
-                    <td>~$599+</td>
-                    <td><strong>$0</strong></td>
+                    <td>pay per op/GB</td>
+                    <td>pay per op/GB</td>
+                    <td>signaling + TURN only</td>
                 </tr>
                 <tr>
                     <td><strong>Transport</strong></td>
@@ -302,31 +312,40 @@
         </table>
 
         <h2>Integration Guide for AI Agents</h2>
-        <p>For AI coding assistants (like Copilot, Claude, or Cursor) building applications, here is the exact copy-paste integration recipe for SyncForge:</p>
+        <p>For AI coding assistants (like Copilot, Claude, or Cursor) building applications, here is the real, executable integration recipe.</p>
+        <p><strong>Two things to get right first.</strong> SyncForge is <strong>not</strong> published to npm &mdash; the name <code>syncforge</code> on the registry belongs to an unrelated package by a different author, so <code>npm install syncforge</code> installs the wrong library. Import from the jsDelivr CDN or build from a clone. And the API is a flat set of named exports: there is no <code>SyncForge.Document</code>, no <code>SyncForge.WebRTCProvider</code> and no <code>SyncForge.PNCounter</code> namespace member. Earlier revisions of this article showed those; they never existed and throw <code>TypeError: ... is not a constructor</code>.</p>
 
-<pre><code>import { SyncForge } from 'syncforge';
+<pre><code>import { SyncForge } from 'https://cdn.jsdelivr.net/gh/itsoumya-d/syncforge@main/dist/index.mjs';
 
-// Initialize a local-first document
-const doc = new SyncForge.Document('shared-workspace-1');
+// 1. Open a local-first database. dbName is required.
+const db = new SyncForge({ dbName: 'shared-workspace-1' });
 
-// Connect to the P2P Mesh
-const network = new SyncForge.WebRTCProvider('wss://signaling.example.com');
-network.connect(doc);
+// 2. Work with collections of documents.
+const tasks = db.collection('tasks');
 
-// React to state changes
-doc.subscribe((state) => {
-  console.log('Current Document State:', state);
-  renderUI(state);
-});
+await tasks.set('task-1', { title: 'Write tests', done: false });
+const task = await tasks.get('task-1');          // { title: 'Write tests', done: false }
 
-// Mutate state directly (SyncForge handles CRDT merging under the hood)
-doc.update((state) => {
-  state.title = "New Title"; // LWW resolution
-  if (!state.counter) state.counter = new SyncForge.PNCounter();
-  state.counter.increment(1);
-});</code></pre>
+await tasks.increment('task-1', 'views', 1);      // PNCounter-backed field
+const open = await tasks.where('done', '==', false).orderBy('title').limit(10).get();
 
-        <p>By keeping computation local and using WebRTC for data transfer, SyncForge delivers a zero-latency, conflict-free database architecture that scales infinitely without increasing your cloud bill.</p>
+// 3. Subscribe to changes.
+const unsubscribe = tasks.subscribe((docs) =&gt; renderUI(docs));
+const unsubscribeDoc = tasks.subscribeDoc('task-1', (doc) =&gt; renderOne(doc));
+
+// 4. Join a peer mesh. You must supply your own signaling server.
+db.on('online', () =&gt; console.log('a peer data channel is open'));
+db.on('offline', () =&gt; console.log('no peers left'));
+db.on('peer-unreachable', (info) =&gt; console.warn('ICE failed', info));
+db.on('signaling-failed', (info) =&gt; console.error('signaling unreachable', info));
+db.on('error', (err) =&gt; console.error(err));
+db.connectPeer('wss://your-signaling-server.example');
+
+console.log(db.isOnline()); // false until a peer channel actually opens</code></pre>
+
+        <p>The CRDT primitives are also exported directly for standalone use: <code>LWWRegister</code>, <code>LWWMap</code>, <code>ORSet</code>, <code>GCounter</code>, <code>PNCounter</code>, <code>VectorClock</code>, plus <code>MemoryAdapter</code> and <code>IndexedDBAdapter</code>.</p>
+
+        <p>Keeping computation local removes the round trip on every read and write, and the CRDT merge rules mean concurrent edits reconcile without a coordinator. What it does not remove is the signaling server, a TURN relay if your users sit behind symmetric NAT, or the need to design for the fact that a lost operation is not automatically recovered.</p>
     </main>
 
 </body>

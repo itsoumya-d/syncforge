@@ -2,7 +2,7 @@ import { LicenseValidator } from "./license-validator";
 // Copyright (c) 2024-2026 Soumya Debnath. All Rights Reserved.
 // Licensed under the Business Source License 1.1 (BSL 1.1).
 // See LICENSE file for details. Production use requires a paid license.
-// Contact: soumyadebnath1661@gmail.com | +91 7031648617
+// Contact: soumyadebnath1661@gmail.com
 
 import { SyncForgeOptions } from './types';
 import { Collection } from './collection';
@@ -19,10 +19,24 @@ export class SyncForge extends EventEmitter {
   private syncManager: SyncManager;
   private storage: StorageAdapter;
 
-  constructor(options?: any) {
-    LicenseValidator.validate(options);
-    // constructor(options: SyncForgeOptions) {
+  constructor(options: SyncForgeOptions) {
+    LicenseValidator.validate(options as any);
     super();
+
+    // Previously `new SyncForge()` and `new SyncForge(null)` failed with an
+    // opaque "Cannot read properties of undefined (reading 'dbName')", while
+    // `new SyncForge('name')`, `new SyncForge(42)` and `new SyncForge({})` were
+    // accepted silently with `dbName === undefined`.
+    if (options === null || typeof options !== 'object' || Array.isArray(options)) {
+      throw new TypeError("SyncForge: options must be an object, e.g. new SyncForge({ dbName: 'my-app' })");
+    }
+    if (typeof options.dbName !== 'string' || options.dbName.length === 0) {
+      throw new TypeError('SyncForge: options.dbName is required and must be a non-empty string');
+    }
+    if (options.peerId !== undefined && (typeof options.peerId !== 'string' || options.peerId.length === 0)) {
+      throw new TypeError('SyncForge: options.peerId must be a non-empty string when provided');
+    }
+
     this.dbName = options.dbName;
     // Generate a random peerId if not provided
     this.peerId = options.peerId || Math.random().toString(36).substring(2, 9);
@@ -39,6 +53,21 @@ export class SyncForge extends EventEmitter {
     this.syncManager.on('online', () => this.emit('online'));
     this.syncManager.on('offline', () => this.emit('offline'));
     this.syncManager.on('sync', (op: any) => this.emit('sync', op));
+    // Forward connection diagnostics so callers can distinguish "peer left"
+    // from "peer unreachable" from "signaling never came up".
+    this.syncManager.on('connecting', (info: any) => this.emit('connecting', info));
+    this.syncManager.on('peer-connected', (id: any) => this.emit('peer-connected', id));
+    this.syncManager.on('peer-disconnected', (id: any) => this.emit('peer-disconnected', id));
+    this.syncManager.on('peer-unreachable', (info: any) => this.emit('peer-unreachable', info));
+    this.syncManager.on('ice-state', (info: any) => this.emit('ice-state', info));
+    this.syncManager.on('ice-candidate-error', (info: any) => this.emit('ice-candidate-error', info));
+    this.syncManager.on('signaling-failed', (info: any) => this.emit('signaling-failed', info));
+    this.syncManager.on('error', (err: any) => this.emit('error', err));
+  }
+
+  /** True only when at least one peer data channel is open. */
+  isOnline(): boolean {
+    return this.syncManager.isConnected();
   }
 
   collection(name: string): Collection {
@@ -61,17 +90,27 @@ export class SyncForge extends EventEmitter {
     return JSON.stringify(ops);
   }
 
+  /**
+   * Replay an operation log produced by `exportData()`.
+   *
+   * Operations already applied are skipped by operation id, so importing the
+   * same snapshot twice is now a no-op. Previously every `inc`/`dec` in the
+   * snapshot was applied again, so `importData(await exportData())` silently
+   * doubled every counter in the database.
+   */
   async importData(json: string): Promise<void> {
+    let ops: unknown;
     try {
-      const ops = JSON.parse(json);
-      if (Array.isArray(ops)) {
-        for (const op of ops) {
-          // Simply push operation through the sync manager to process
-          this.syncManager.receive(op);
-        }
-      }
+      ops = JSON.parse(json);
     } catch (e) {
-      console.error('Failed to import data:', e);
+      throw new SyntaxError('SyncForge: importData received invalid JSON: ' +
+        (e instanceof Error ? e.message : String(e)));
+    }
+    if (!Array.isArray(ops)) {
+      throw new TypeError('SyncForge: importData expects a JSON array of operations');
+    }
+    for (const op of ops) {
+      this.syncManager.receive(op as any);
     }
   }
 }
