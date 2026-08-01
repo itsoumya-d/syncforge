@@ -1,5 +1,18 @@
 # Commercial License — SyncForge
 
+> ### ⚠️ You probably do not need this licence
+>
+> As of the relicensing, this software is available under **AGPL-3.0-or-later** free of charge for
+> any purpose, including commercial and production use. You do **not** need to pay, ask permission,
+> or obtain a key.
+>
+> A commercial licence buys exactly one thing: **an exception to the AGPL's requirement that you
+> publish your modifications** if you run a modified version as a network service. If you are happy
+> to comply with the AGPL — or you are not modifying the source — the free option is the right one.
+
+---
+
+
 > Replaces: Firebase Realtime DB ($0.06/GB stored + $1/GB downloaded), Supabase ($25-$599/mo), MongoDB Atlas.
 > SyncForge stores data locally in IndexedDB with CRDT-based conflict resolution. Works 100% offline.
 
