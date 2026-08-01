@@ -13,4 +13,4 @@ Allow: /
 User-agent: Google-Extended
 Allow: /
 
-Sitemap: https://syncforge.dev/sitemap.xml
+Sitemap: https://itsoumya-d.github.io/syncforge/sitemap.xml
