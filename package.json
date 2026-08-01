@@ -30,7 +30,7 @@
     "webrtc",
     "offline"
   ],
-  "author": "Soumya Debnath <soumyadebnath1661@gmail.com>",
+  "author": "Soumya Debnath <soumyadebnath1619@gmail.com>",
   "license": "AGPL-3.0-or-later",
   "devDependencies": {
     "tsup": "^8.0.0",
