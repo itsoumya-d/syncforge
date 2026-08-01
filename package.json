@@ -5,9 +5,23 @@
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "src"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/itsoumya-d/syncforge.git"
+  },
+  "homepage": "https://itsoumya-d.github.io/syncforge/",
+  "bugs": {
+    "url": "https://github.com/itsoumya-d/syncforge/issues"
+  },
   "scripts": {
     "build": "tsup src/index.ts --format cjs,esm --dts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test tests/*.test.mjs",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "crdt",
@@ -16,7 +30,7 @@
     "webrtc",
     "offline"
   ],
-  "author": "",
+  "author": "Soumya Debnath <soumyadebnath1661@gmail.com>",
   "license": "BSL-1.1",
   "devDependencies": {
     "tsup": "^8.0.0",
