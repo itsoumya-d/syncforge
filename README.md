@@ -7,7 +7,7 @@
 
 # SyncForge
 
-**The Local-First, Peer-to-Peer CRDT Database for the Modern Web**
+**SyncForge keeps application state consistent across devices and collaborators using CRDTs, so edits merge deterministically without a central database and keep working offline.**
 
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-red.svg)](https://mariadb.com/bsl11/)
 [![Status: Pre-Release](https://img.shields.io/badge/status-pre--release-orange.svg)]()
