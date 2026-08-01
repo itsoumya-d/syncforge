@@ -57,7 +57,7 @@ A collaborative SaaS app with 100K MAU on Firebase:
 
 **Soumya Debnath** — Creator & Sole Rights Holder
 
-- 📧 Email: [soumyadebnath1661@gmail.com](mailto:soumyadebnath1661@gmail.com)
+- 📧 Email: [soumyadebnath1619@gmail.com](mailto:soumyadebnath1619@gmail.com)
 - 📞 Phone / WhatsApp: [+91 7031648617](tel:+917031648617)
 - 🐙 GitHub: [github.com/itsoumya-d](https://github.com/itsoumya-d)
 

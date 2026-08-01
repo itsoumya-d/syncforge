@@ -96,5 +96,5 @@ One caveat materially changes that picture: writes to a **single** document are 
 
 ## Contact
 
-Author and rights holder: Soumya Debnath — soumyadebnath1661@gmail.com
+Author and rights holder: Soumya Debnath — soumyadebnath1619@gmail.com
 Commercial licence terms: see `COMMERCIAL_LICENSE.md` in the repository.

@@ -29,7 +29,7 @@ var _LicenseValidator = class _LicenseValidator {
   }
 };
 _LicenseValidator.AUTHOR = "Soumya Debnath";
-_LicenseValidator.CONTACT = "soumyadebnath1661@gmail.com";
+_LicenseValidator.CONTACT = "soumyadebnath1619@gmail.com";
 var LicenseValidator = _LicenseValidator;
 
 // src/query.ts
