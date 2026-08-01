@@ -1,6 +1,6 @@
 # SyncForge
 
-> CRDT-powered, local-first real-time database for the browser and Node.js.
+> SyncForge keeps application state consistent across devices and collaborators using CRDTs, so edits merge deterministically without a central database and keep working offline.
 
 SyncForge stores data locally in IndexedDB (browser) or in-memory (Node.js), applies CRDT-based conflict resolution, and synchronises peer-to-peer over WebRTC DataChannels when online. It is in pre-release, is not published to npm, and has no production adopters.
 
