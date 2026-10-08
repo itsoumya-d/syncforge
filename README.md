@@ -179,7 +179,8 @@ db.connectPeer('wss://signaling.yourserver.com');
 
 `peer-unreachable` is what distinguishes "network failure" from "peer left voluntarily"; `peer-disconnected` alone does not.
 - `exportData(): Promise<string>` — exports all stored operations as a JSON string.
-- `importData(json: string): Promise<void>` — imports data and applies it locally.
+- `importData(json: string): Promise<void>` — validates and restores an exported operation log, including collections not yet opened. Resolves after the restored documents and operation log are committed; restored operations are included in later exports. Concurrent/repeated imports on the same `SyncForge` instance are deduplicated.
+  - Built-in Memory/IndexedDB adapters commit each operation atomically. A storage failure rejects the import; earlier operations may already be committed, and retrying the snapshot is safe. Custom adapters need `commitOperation` and `hasOperation` for the same atomic/restart-safe behavior. Use one live `SyncForge` instance per `dbName`: concurrent read-modify-write operations from separate instances/tabs are not coordinated. Reopening after closing the previous instance is supported. This is per-operation atomicity, not an all-or-nothing transaction for the entire snapshot.
 
 ### `Collection`
 

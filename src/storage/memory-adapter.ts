@@ -19,7 +19,7 @@ export class MemoryAdapter implements StorageAdapter {
    * members, which closes both vectors.
    */
   private collections: Map<string, Map<string, any>> = new Map();
-  private operations: Operation[] = [];
+  private operations: Map<string, Operation> = new Map();
 
   async get(collection: string, id: string): Promise<any> {
     const store = this.collections.get(collection);
@@ -48,10 +48,25 @@ export class MemoryAdapter implements StorageAdapter {
   }
 
   async saveOperation(op: Operation): Promise<void> {
-    this.operations.push(op);
+    this.operations.set(op.id, op);
+  }
+
+  async hasOperation(id: string): Promise<boolean> {
+    return this.operations.has(id);
+  }
+
+  async commitOperation(collection: string, id: string, metadata: any, document: any | null, op: Operation): Promise<void> {
+    // All mutations are synchronous: no reader can observe a partial commit.
+    for (const name of [collection, `${collection}_meta`]) {
+      if (!this.collections.has(name)) this.collections.set(name, new Map());
+    }
+    this.collections.get(`${collection}_meta`)!.set(id, metadata);
+    if (document === null) this.collections.get(collection)!.delete(id);
+    else this.collections.get(collection)!.set(id, document);
+    this.operations.set(op.id, op);
   }
 
   async getOperations(): Promise<Operation[]> {
-    return [...this.operations];
+    return [...this.operations.values()];
   }
 }

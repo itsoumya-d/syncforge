@@ -4,7 +4,7 @@
 // Contact: soumyadebnath1619@gmail.com
 
 import { EventEmitter } from '../events';
-import { Operation } from './operation';
+import { Operation, assertOperation } from './operation';
 import { VectorClock } from './vector-clock';
 import { WebRTCTransport } from './webrtc-transport';
 
@@ -27,8 +27,10 @@ export class SyncManager extends EventEmitter {
   private appliedOps: Set<string> = new Set();
   private appliedOrder: string[] = [];
   private static readonly MAX_APPLIED_OPS = 100000;
+  private pendingOps: Map<string, Promise<void>> = new Map();
+  private operationHandlers: Map<string, (op: Operation) => Promise<void>> = new Map();
 
-  constructor(peerId: string) {
+  constructor(peerId: string, private ensureCollection?: (name: string) => void) {
     super();
     this.peerId = peerId;
     this.vectorClock = new VectorClock(peerId);
@@ -228,7 +230,10 @@ export class SyncManager extends EventEmitter {
       const operation = JSON.parse(dataStr);
 
       if (clock && typeof clock === 'object') this.vectorClock.update(clock);
-      this.receive(operation);
+      this.receive(operation).catch((error) => {
+        this.emit('error', error);
+        console.error('SyncForge: failed to apply remote operation', error);
+      });
     } catch (e) {
       console.error('SyncForge: failed to parse remote operation', e);
     }
@@ -244,24 +249,34 @@ export class SyncManager extends EventEmitter {
    * Duplicates are dropped by operation id so that at-least-once delivery is
    * safe for the non-idempotent `inc`/`dec` operations.
    */
-  receive(operation: Operation): void {
-    if (!operation || typeof operation !== 'object') return;
-
+  receive(operation: Operation): Promise<void> {
+    try { assertOperation(operation); }
+    catch (error) { return Promise.reject(error); }
     const id = operation.id;
-    if (typeof id === 'string' && id.length > 0) {
-      if (this.appliedOps.has(id)) return;
-      this.appliedOps.add(id);
-      this.appliedOrder.push(id);
-      if (this.appliedOrder.length > SyncManager.MAX_APPLIED_OPS) {
-        const evicted = this.appliedOrder.shift();
-        if (evicted !== undefined) this.appliedOps.delete(evicted);
-      }
-    }
+    if (this.appliedOps.has(id)) return Promise.resolve();
+    const pending = this.pendingOps.get(id);
+    if (pending) return pending;
 
-    if (typeof operation.peerId === 'string' && typeof operation.timestamp === 'number') {
-      this.vectorClock.update({ [operation.peerId]: operation.timestamp });
-    }
-    this.emit('sync', operation);
+    // Observe the remote clock before another local write can be stamped.
+    this.vectorClock.update({ [operation.peerId]: operation.timestamp });
+    const applying = Promise.resolve().then(async () => {
+      this.ensureCollection?.(operation.collection);
+      const handler = this.operationHandlers.get(operation.collection);
+      if (handler) await handler(operation);
+      this.markApplied(id);
+      this.emit('sync', operation);
+    });
+    this.pendingOps.set(id, applying);
+    // A failed commit must stay retryable; concurrent duplicate deliveries
+    // share its result rather than resolving while the first is still pending.
+    const cleanup = () => this.pendingOps.delete(id);
+    applying.then(cleanup, cleanup);
+    return applying;
+  }
+
+  /** @internal Register an awaitable storage handler, separate from observers. */
+  registerOperationHandler(collection: string, handler: (op: Operation) => Promise<void>): void {
+    this.operationHandlers.set(collection, handler);
   }
 
   /** Record a locally generated operation id so an echo of it is ignored. */

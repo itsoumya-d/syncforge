@@ -115,6 +115,39 @@ export class IndexedDBAdapter implements StorageAdapter {
     });
   }
 
+  async hasOperation(id: string): Promise<boolean> {
+    await this.ready;
+    if (!this.db) return false;
+    return new Promise((resolve, reject) => {
+      const transaction = this.db!.transaction('operations', 'readonly');
+      const request = transaction.objectStore('operations').get(id);
+      transaction.oncomplete = () => resolve(request.result !== undefined);
+      transaction.onabort = () => reject(transaction.error || new Error('SyncForge: operation lookup aborted'));
+      transaction.onerror = () => reject(transaction.error);
+    });
+  }
+
+  async commitOperation(collection: string, id: string, metadata: any, document: any | null, op: Operation): Promise<void> {
+    await this.ready;
+    if (!this.db) throw new Error('SyncForge: storage is unavailable');
+    return new Promise((resolve, reject) => {
+      const transaction = this.db!.transaction(['documents', 'operations'], 'readwrite');
+      transaction.oncomplete = () => resolve();
+      transaction.onabort = () => reject(transaction.error || new Error('SyncForge: operation commit aborted'));
+      transaction.onerror = () => reject(transaction.error);
+      try {
+        const documents = transaction.objectStore('documents');
+        documents.put({ collection: `${collection}_meta`, id, data: metadata });
+        if (document === null) documents.delete([collection, id]);
+        else documents.put({ collection, id, data: document });
+        transaction.objectStore('operations').put(op);
+      } catch (error) {
+        transaction.abort();
+        reject(error);
+      }
+    });
+  }
+
   async getOperations(): Promise<Operation[]> {
     await this.ready;
     if (!this.db) return [];

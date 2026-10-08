@@ -7,6 +7,7 @@ import { LicenseValidator } from "./license-validator";
 import { SyncForgeOptions } from './types';
 import { Collection } from './collection';
 import { SyncManager } from './sync/sync-manager';
+import { assertOperation } from './sync/operation';
 import { StorageAdapter } from './storage/types';
 import { IndexedDBAdapter } from './storage/indexeddb-adapter';
 import { EventEmitter } from './events';
@@ -48,7 +49,7 @@ export class SyncForge extends EventEmitter {
       this.storage = new MemoryAdapter();
     }
 
-    this.syncManager = new SyncManager(this.peerId);
+    this.syncManager = new SyncManager(this.peerId, (name) => { this.collection(name); });
     
     this.syncManager.on('online', () => this.emit('online'));
     this.syncManager.on('offline', () => this.emit('offline'));
@@ -109,8 +110,9 @@ export class SyncForge extends EventEmitter {
     if (!Array.isArray(ops)) {
       throw new TypeError('SyncForge: importData expects a JSON array of operations');
     }
+    for (const op of ops) assertOperation(op);
     for (const op of ops) {
-      this.syncManager.receive(op as any);
+      await this.syncManager.receive(op);
     }
   }
 }
