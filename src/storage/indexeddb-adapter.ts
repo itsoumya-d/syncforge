@@ -156,8 +156,9 @@ export class IndexedDBAdapter implements StorageAdapter {
       const store = transaction.objectStore('operations');
       const request = store.getAll();
       
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
+      transaction.oncomplete = () => resolve(request.result);
+      transaction.onabort = () => reject(transaction.error || new Error('SyncForge: operation history read aborted'));
+      transaction.onerror = () => reject(transaction.error);
     });
   }
 }

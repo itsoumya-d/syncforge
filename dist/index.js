@@ -342,7 +342,7 @@ var LWWMap = _LWWMap;
 // src/crdt/g-counter.ts
 var GCounter = class {
   constructor(counts = {}) {
-    this.counts = { ...counts };
+    this.counts = Object.assign(/* @__PURE__ */ Object.create(null), counts);
   }
   increment(peerId, amount = 1) {
     if (amount < 0) throw new Error("GCounter can only increment by positive amounts");
@@ -381,8 +381,9 @@ var PNCounter = class {
 
 // src/collection.ts
 var Collection = class _Collection extends EventEmitter {
-  constructor(name, db, storage, sync) {
+  constructor(name, db, storage, sync, prepareWrite = () => Promise.resolve()) {
     super();
+    this.prepareWrite = prepareWrite;
     /**
      * Per-document serialisation chain.
      *
@@ -402,6 +403,7 @@ var Collection = class _Collection extends EventEmitter {
   }
   async set(id, data) {
     _Collection.assertSerialisable(data);
+    await this.prepareWrite();
     const timestamp = this.sync.getVectorClock().increment();
     const op = {
       id: `${this.db.peerId}-${timestamp}`,
@@ -421,6 +423,7 @@ var Collection = class _Collection extends EventEmitter {
     return this.storage.get(this.name, id);
   }
   async delete(id) {
+    await this.prepareWrite();
     const timestamp = this.sync.getVectorClock().increment();
     const op = {
       id: `${this.db.peerId}-${timestamp}`,
@@ -469,6 +472,7 @@ var Collection = class _Collection extends EventEmitter {
     return () => this.off("change", listener);
   }
   async increment(id, field, amount = 1) {
+    await this.prepareWrite();
     const timestamp = this.sync.getVectorClock().increment();
     const op = {
       id: `${this.db.peerId}-${timestamp}`,
@@ -485,6 +489,7 @@ var Collection = class _Collection extends EventEmitter {
     this.sync.broadcast(op);
   }
   async decrement(id, field, amount = 1) {
+    await this.prepareWrite();
     const timestamp = this.sync.getVectorClock().increment();
     const op = {
       id: `${this.db.peerId}-${timestamp}`,
@@ -602,7 +607,7 @@ function assertOperation(value) {
 // src/sync/vector-clock.ts
 var VectorClock = class {
   constructor(localPeerId) {
-    this.clocks = {};
+    this.clocks = /* @__PURE__ */ Object.create(null);
     this.localPeerId = localPeerId;
     this.clocks[localPeerId] = 0;
   }
@@ -624,8 +629,18 @@ var VectorClock = class {
     for (const value of Object.values(this.clocks)) {
       if (value > max) max = value;
     }
+    if (max >= Number.MAX_SAFE_INTEGER) {
+      throw new RangeError("SyncForge: logical clock exhausted");
+    }
     this.clocks[this.localPeerId] = max + 1;
     return this.clocks[this.localPeerId];
+  }
+  /** Restore a persisted high-water mark without trusting peer names as keys. */
+  restore(timestamp) {
+    if (!Number.isSafeInteger(timestamp) || timestamp < 0) {
+      throw new TypeError("SyncForge: invalid persisted clock");
+    }
+    this.clocks[this.localPeerId] = Math.max(this.getTimestamp(), timestamp);
   }
   update(remoteClock) {
     for (const [peerId, timestamp] of Object.entries(remoteClock)) {
@@ -1101,6 +1116,7 @@ var _SyncManager = class _SyncManager extends EventEmitter {
     const pending = this.pendingOps.get(id);
     if (pending) return pending;
     this.vectorClock.update({ [operation.peerId]: operation.timestamp });
+    this.vectorClock.restore(operation.timestamp);
     const applying = Promise.resolve().then(async () => {
       this.ensureCollection?.(operation.collection);
       const handler = this.operationHandlers.get(operation.collection);
@@ -1263,8 +1279,9 @@ var IndexedDBAdapter = class {
       const transaction = this.db.transaction("operations", "readonly");
       const store = transaction.objectStore("operations");
       const request = store.getAll();
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
+      transaction.oncomplete = () => resolve(request.result);
+      transaction.onabort = () => reject(transaction.error || new Error("SyncForge: operation history read aborted"));
+      transaction.onerror = () => reject(transaction.error);
     });
   }
 };
@@ -1371,9 +1388,25 @@ var SyncForge = class extends EventEmitter {
   }
   collection(name) {
     if (!this.collections.has(name)) {
-      this.collections.set(name, new Collection(name, this, this.storage, this.syncManager));
+      this.collections.set(name, new Collection(name, this, this.storage, this.syncManager, () => this.prepareLocalWrite()));
     }
     return this.collections.get(name);
+  }
+  /** Restore the logical clock before allocating any new operation identity. */
+  prepareLocalWrite() {
+    if (!this.clockReady) {
+      const pending = this.storage.getOperations().then((operations) => {
+        for (const operation of operations) assertOperation(operation);
+        for (const operation of operations) {
+          this.syncManager.getVectorClock().restore(operation.timestamp);
+        }
+      });
+      this.clockReady = pending;
+      pending.catch(() => {
+        if (this.clockReady === pending) this.clockReady = void 0;
+      });
+    }
+    return this.clockReady;
   }
   connectPeer(signalingUrl) {
     this.syncManager.connect(signalingUrl);

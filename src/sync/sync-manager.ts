@@ -259,6 +259,7 @@ export class SyncManager extends EventEmitter {
 
     // Observe the remote clock before another local write can be stamped.
     this.vectorClock.update({ [operation.peerId]: operation.timestamp });
+    this.vectorClock.restore(operation.timestamp);
     const applying = Promise.resolve().then(async () => {
       this.ensureCollection?.(operation.collection);
       const handler = this.operationHandlers.get(operation.collection);

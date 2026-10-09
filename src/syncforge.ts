@@ -19,6 +19,7 @@ export class SyncForge extends EventEmitter {
   private collections: Map<string, Collection> = new Map();
   private syncManager: SyncManager;
   private storage: StorageAdapter;
+  private clockReady?: Promise<void>;
 
   constructor(options: SyncForgeOptions) {
     LicenseValidator.validate(options as any);
@@ -73,9 +74,29 @@ export class SyncForge extends EventEmitter {
 
   collection(name: string): Collection {
     if (!this.collections.has(name)) {
-      this.collections.set(name, new Collection(name, this, this.storage, this.syncManager));
+      this.collections.set(name, new Collection(name, this, this.storage, this.syncManager, () => this.prepareLocalWrite()));
     }
     return this.collections.get(name)!;
+  }
+
+  /** Restore the logical clock before allocating any new operation identity. */
+  private prepareLocalWrite(): Promise<void> {
+    if (!this.clockReady) {
+      const pending = this.storage.getOperations().then((operations) => {
+        // Validate the whole log before updating the clock. A failed read or
+        // malformed history must not silently restart operation IDs at zero.
+        for (const operation of operations) assertOperation(operation);
+        for (const operation of operations) {
+          this.syncManager.getVectorClock().restore(operation.timestamp);
+        }
+      });
+      this.clockReady = pending;
+      // All concurrent writers share the failure; a later call can retry.
+      pending.catch(() => {
+        if (this.clockReady === pending) this.clockReady = undefined;
+      });
+    }
+    return this.clockReady;
   }
 
   connectPeer(signalingUrl: string): void {

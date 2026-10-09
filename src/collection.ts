@@ -29,7 +29,8 @@ export class Collection extends EventEmitter {
    */
   private applyQueues: Map<string, Promise<void>> = new Map();
 
-  constructor(name: string, db: SyncForge, storage: StorageAdapter, sync: SyncManager) {
+  constructor(name: string, db: SyncForge, storage: StorageAdapter, sync: SyncManager,
+    private prepareWrite: () => Promise<void> = () => Promise.resolve()) {
     super();
     this.name = name;
     this.db = db;
@@ -46,6 +47,7 @@ export class Collection extends EventEmitter {
     // `exportData()` stayed permanently broken because the poisoned operation
     // could not be removed. Fail fast instead, before mutating any state.
     Collection.assertSerialisable(data);
+    await this.prepareWrite();
     const timestamp = this.sync.getVectorClock().increment();
     const op = {
       id: `${this.db.peerId}-${timestamp}`,
@@ -68,6 +70,7 @@ export class Collection extends EventEmitter {
   }
 
   async delete(id: string): Promise<void> {
+    await this.prepareWrite();
     const timestamp = this.sync.getVectorClock().increment();
     const op = {
       id: `${this.db.peerId}-${timestamp}`,
@@ -124,6 +127,7 @@ export class Collection extends EventEmitter {
   }
 
   async increment(id: string, field: string, amount: number = 1): Promise<void> {
+    await this.prepareWrite();
     const timestamp = this.sync.getVectorClock().increment();
     const op = {
       id: `${this.db.peerId}-${timestamp}`,
@@ -142,6 +146,7 @@ export class Collection extends EventEmitter {
   }
 
   async decrement(id: string, field: string, amount: number = 1): Promise<void> {
+    await this.prepareWrite();
     const timestamp = this.sync.getVectorClock().increment();
     const op = {
       id: `${this.db.peerId}-${timestamp}`,

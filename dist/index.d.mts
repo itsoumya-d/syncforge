@@ -79,6 +79,8 @@ declare class VectorClock {
      * the replica's own local write.
      */
     increment(): number;
+    /** Restore a persisted high-water mark without trusting peer names as keys. */
+    restore(timestamp: number): void;
     update(remoteClock: Record<string, number>): void;
     getClock(): Record<string, number>;
     getTimestamp(): number;
@@ -157,6 +159,7 @@ declare class SyncManager extends EventEmitter {
 }
 
 declare class Collection extends EventEmitter {
+    private prepareWrite;
     private name;
     private db;
     private storage;
@@ -172,7 +175,7 @@ declare class Collection extends EventEmitter {
      * different documents still run concurrently.
      */
     private applyQueues;
-    constructor(name: string, db: SyncForge, storage: StorageAdapter, sync: SyncManager);
+    constructor(name: string, db: SyncForge, storage: StorageAdapter, sync: SyncManager, prepareWrite?: () => Promise<void>);
     set(id: string, data: object): Promise<void>;
     get(id: string): Promise<Document | null>;
     delete(id: string): Promise<void>;
@@ -199,10 +202,13 @@ declare class SyncForge extends EventEmitter {
     private collections;
     private syncManager;
     private storage;
+    private clockReady?;
     constructor(options: SyncForgeOptions);
     /** True only when at least one peer data channel is open. */
     isOnline(): boolean;
     collection(name: string): Collection;
+    /** Restore the logical clock before allocating any new operation identity. */
+    private prepareLocalWrite;
     connectPeer(signalingUrl: string): void;
     disconnect(): void;
     exportData(): Promise<string>;
