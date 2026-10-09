@@ -4,7 +4,7 @@
 // Contact: soumyadebnath1619@gmail.com
 
 export class VectorClock {
-  private clocks: Record<string, number> = {};
+  private clocks: Record<string, number> = Object.create(null);
   private localPeerId: string;
 
   constructor(localPeerId: string) {
@@ -30,8 +30,19 @@ export class VectorClock {
     for (const value of Object.values(this.clocks)) {
       if (value > max) max = value;
     }
+    if (max >= Number.MAX_SAFE_INTEGER) {
+      throw new RangeError('SyncForge: logical clock exhausted');
+    }
     this.clocks[this.localPeerId] = max + 1;
     return this.clocks[this.localPeerId];
+  }
+
+  /** Restore a persisted high-water mark without trusting peer names as keys. */
+  restore(timestamp: number): void {
+    if (!Number.isSafeInteger(timestamp) || timestamp < 0) {
+      throw new TypeError('SyncForge: invalid persisted clock');
+    }
+    this.clocks[this.localPeerId] = Math.max(this.getTimestamp(), timestamp);
   }
 
   update(remoteClock: Record<string, number>): void {

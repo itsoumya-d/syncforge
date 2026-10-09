@@ -29,22 +29,15 @@ export class Collection extends EventEmitter {
    */
   private applyQueues: Map<string, Promise<void>> = new Map();
 
-  constructor(name: string, db: SyncForge, storage: StorageAdapter, sync: SyncManager) {
+  constructor(name: string, db: SyncForge, storage: StorageAdapter, sync: SyncManager,
+    private prepareWrite: () => Promise<void> = () => Promise.resolve()) {
     super();
     this.name = name;
     this.db = db;
     this.storage = storage;
     this.sync = sync;
 
-    this.sync.on('sync', (op: any) => {
-      if (op.collection === this.name) {
-        // Fire-and-forget by design (EventEmitter is synchronous), but errors
-        // must not become unhandled rejections.
-        this.applyOperationLocally(op).catch((err) => {
-          console.error('SyncForge: failed to apply remote operation', err);
-        });
-      }
-    });
+    this.sync.registerOperationHandler(this.name, (op) => this.applyOperationLocally(op, true));
   }
 
   async set(id: string, data: object): Promise<void> {
@@ -54,6 +47,7 @@ export class Collection extends EventEmitter {
     // `exportData()` stayed permanently broken because the poisoned operation
     // could not be removed. Fail fast instead, before mutating any state.
     Collection.assertSerialisable(data);
+    await this.prepareWrite();
     const timestamp = this.sync.getVectorClock().increment();
     const op = {
       id: `${this.db.peerId}-${timestamp}`,
@@ -66,9 +60,8 @@ export class Collection extends EventEmitter {
       peerId: this.db.peerId
     };
     
-    this.sync.markApplied(op.id);
     await this.applyOperationLocally(op);
-    await this.storage.saveOperation(op);
+    this.sync.markApplied(op.id);
     this.sync.broadcast(op);
   }
 
@@ -77,6 +70,7 @@ export class Collection extends EventEmitter {
   }
 
   async delete(id: string): Promise<void> {
+    await this.prepareWrite();
     const timestamp = this.sync.getVectorClock().increment();
     const op = {
       id: `${this.db.peerId}-${timestamp}`,
@@ -89,9 +83,8 @@ export class Collection extends EventEmitter {
       peerId: this.db.peerId
     };
     
-    this.sync.markApplied(op.id);
     await this.applyOperationLocally(op);
-    await this.storage.saveOperation(op);
+    this.sync.markApplied(op.id);
     this.sync.broadcast(op);
   }
 
@@ -134,6 +127,7 @@ export class Collection extends EventEmitter {
   }
 
   async increment(id: string, field: string, amount: number = 1): Promise<void> {
+    await this.prepareWrite();
     const timestamp = this.sync.getVectorClock().increment();
     const op = {
       id: `${this.db.peerId}-${timestamp}`,
@@ -146,13 +140,13 @@ export class Collection extends EventEmitter {
       peerId: this.db.peerId
     };
     
-    this.sync.markApplied(op.id);
     await this.applyOperationLocally(op);
-    await this.storage.saveOperation(op);
+    this.sync.markApplied(op.id);
     this.sync.broadcast(op);
   }
 
   async decrement(id: string, field: string, amount: number = 1): Promise<void> {
+    await this.prepareWrite();
     const timestamp = this.sync.getVectorClock().increment();
     const op = {
       id: `${this.db.peerId}-${timestamp}`,
@@ -165,9 +159,8 @@ export class Collection extends EventEmitter {
       peerId: this.db.peerId
     };
     
-    this.sync.markApplied(op.id);
     await this.applyOperationLocally(op);
-    await this.storage.saveOperation(op);
+    this.sync.markApplied(op.id);
     this.sync.broadcast(op);
   }
 
@@ -175,12 +168,15 @@ export class Collection extends EventEmitter {
    * Queue `op` behind any in-flight operation for the same document, so the
    * read-modify-write below can never interleave with itself.
    */
-  private applyOperationLocally(op: any): Promise<void> {
+  private applyOperationLocally(op: any, replay = false): Promise<void> {
     const key = String(op && op.docId);
     const previous = this.applyQueues.get(key) || Promise.resolve();
     const next = previous
       .catch(() => { /* a failed predecessor must not block the queue */ })
-      .then(() => this.applyOperationUnsafe(op));
+      .then(async () => {
+        if (replay && this.storage.hasOperation && await this.storage.hasOperation(op.id)) return;
+        await this.applyOperationUnsafe(op);
+      });
     this.applyQueues.set(key, next);
     // Drop the chain once it drains so the map does not grow without bound.
     next.catch(() => {}).then(() => {
@@ -237,16 +233,14 @@ export class Collection extends EventEmitter {
       counters[op.field].decrement(op.peerId, op.value);
     }
 
-    meta.mapData = {};
+    const nextMeta: any = { mapData: {}, counterData: {} };
     for (const [k, reg] of map.data.entries()) {
-      meta.mapData[k] = { value: reg.value, timestamp: reg.timestamp, peerId: reg.peerId };
+      nextMeta.mapData[k] = { value: reg.value, timestamp: reg.timestamp, peerId: reg.peerId };
     }
     
-    meta.counterData = {};
     for (const [k, counter] of Object.entries(counters)) {
-      meta.counterData[k] = { positives: counter.positives.counts, negatives: counter.negatives.counts };
+      nextMeta.counterData[k] = { positives: counter.positives.counts, negatives: counter.negatives.counts };
     }
-    await this.storage.set(`${this.name}_meta`, op.docId, meta);
 
     const docView = map.toJSON();
     for (const [k, counter] of Object.entries(counters)) {
@@ -257,10 +251,14 @@ export class Collection extends EventEmitter {
     const isDeleted = docView._deleted === true;
     delete docView._deleted;
 
-    if (isDeleted) {
-      await this.storage.delete(this.name, op.docId);
+    if (this.storage.commitOperation) {
+      await this.storage.commitOperation(this.name, op.docId, nextMeta, isDeleted ? null : docView, op);
     } else {
-      await this.storage.set(this.name, op.docId, docView);
+      // Compatibility for custom adapters. Built-in adapters commit atomically.
+      await this.storage.set(`${this.name}_meta`, op.docId, nextMeta);
+      if (isDeleted) await this.storage.delete(this.name, op.docId);
+      else await this.storage.set(this.name, op.docId, docView);
+      await this.storage.saveOperation(op);
     }
 
     this.emit('change', op.docId);

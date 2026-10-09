@@ -303,7 +303,7 @@ var LWWMap = _LWWMap;
 // src/crdt/g-counter.ts
 var GCounter = class {
   constructor(counts = {}) {
-    this.counts = { ...counts };
+    this.counts = Object.assign(/* @__PURE__ */ Object.create(null), counts);
   }
   increment(peerId, amount = 1) {
     if (amount < 0) throw new Error("GCounter can only increment by positive amounts");
@@ -342,8 +342,9 @@ var PNCounter = class {
 
 // src/collection.ts
 var Collection = class _Collection extends EventEmitter {
-  constructor(name, db, storage, sync) {
+  constructor(name, db, storage, sync, prepareWrite = () => Promise.resolve()) {
     super();
+    this.prepareWrite = prepareWrite;
     /**
      * Per-document serialisation chain.
      *
@@ -359,16 +360,11 @@ var Collection = class _Collection extends EventEmitter {
     this.db = db;
     this.storage = storage;
     this.sync = sync;
-    this.sync.on("sync", (op) => {
-      if (op.collection === this.name) {
-        this.applyOperationLocally(op).catch((err) => {
-          console.error("SyncForge: failed to apply remote operation", err);
-        });
-      }
-    });
+    this.sync.registerOperationHandler(this.name, (op) => this.applyOperationLocally(op, true));
   }
   async set(id, data) {
     _Collection.assertSerialisable(data);
+    await this.prepareWrite();
     const timestamp = this.sync.getVectorClock().increment();
     const op = {
       id: `${this.db.peerId}-${timestamp}`,
@@ -380,15 +376,15 @@ var Collection = class _Collection extends EventEmitter {
       timestamp,
       peerId: this.db.peerId
     };
-    this.sync.markApplied(op.id);
     await this.applyOperationLocally(op);
-    await this.storage.saveOperation(op);
+    this.sync.markApplied(op.id);
     this.sync.broadcast(op);
   }
   async get(id) {
     return this.storage.get(this.name, id);
   }
   async delete(id) {
+    await this.prepareWrite();
     const timestamp = this.sync.getVectorClock().increment();
     const op = {
       id: `${this.db.peerId}-${timestamp}`,
@@ -400,9 +396,8 @@ var Collection = class _Collection extends EventEmitter {
       timestamp,
       peerId: this.db.peerId
     };
-    this.sync.markApplied(op.id);
     await this.applyOperationLocally(op);
-    await this.storage.saveOperation(op);
+    this.sync.markApplied(op.id);
     this.sync.broadcast(op);
   }
   async getAll() {
@@ -438,6 +433,7 @@ var Collection = class _Collection extends EventEmitter {
     return () => this.off("change", listener);
   }
   async increment(id, field, amount = 1) {
+    await this.prepareWrite();
     const timestamp = this.sync.getVectorClock().increment();
     const op = {
       id: `${this.db.peerId}-${timestamp}`,
@@ -449,12 +445,12 @@ var Collection = class _Collection extends EventEmitter {
       timestamp,
       peerId: this.db.peerId
     };
-    this.sync.markApplied(op.id);
     await this.applyOperationLocally(op);
-    await this.storage.saveOperation(op);
+    this.sync.markApplied(op.id);
     this.sync.broadcast(op);
   }
   async decrement(id, field, amount = 1) {
+    await this.prepareWrite();
     const timestamp = this.sync.getVectorClock().increment();
     const op = {
       id: `${this.db.peerId}-${timestamp}`,
@@ -466,20 +462,22 @@ var Collection = class _Collection extends EventEmitter {
       timestamp,
       peerId: this.db.peerId
     };
-    this.sync.markApplied(op.id);
     await this.applyOperationLocally(op);
-    await this.storage.saveOperation(op);
+    this.sync.markApplied(op.id);
     this.sync.broadcast(op);
   }
   /**
    * Queue `op` behind any in-flight operation for the same document, so the
    * read-modify-write below can never interleave with itself.
    */
-  applyOperationLocally(op) {
+  applyOperationLocally(op, replay = false) {
     const key = String(op && op.docId);
     const previous = this.applyQueues.get(key) || Promise.resolve();
     const next = previous.catch(() => {
-    }).then(() => this.applyOperationUnsafe(op));
+    }).then(async () => {
+      if (replay && this.storage.hasOperation && await this.storage.hasOperation(op.id)) return;
+      await this.applyOperationUnsafe(op);
+    });
     this.applyQueues.set(key, next);
     next.catch(() => {
     }).then(() => {
@@ -524,35 +522,53 @@ var Collection = class _Collection extends EventEmitter {
       if (!counters[op.field]) counters[op.field] = new PNCounter();
       counters[op.field].decrement(op.peerId, op.value);
     }
-    meta.mapData = {};
+    const nextMeta = { mapData: {}, counterData: {} };
     for (const [k, reg] of map.data.entries()) {
-      meta.mapData[k] = { value: reg.value, timestamp: reg.timestamp, peerId: reg.peerId };
+      nextMeta.mapData[k] = { value: reg.value, timestamp: reg.timestamp, peerId: reg.peerId };
     }
-    meta.counterData = {};
     for (const [k, counter] of Object.entries(counters)) {
-      meta.counterData[k] = { positives: counter.positives.counts, negatives: counter.negatives.counts };
+      nextMeta.counterData[k] = { positives: counter.positives.counts, negatives: counter.negatives.counts };
     }
-    await this.storage.set(`${this.name}_meta`, op.docId, meta);
     const docView = map.toJSON();
     for (const [k, counter] of Object.entries(counters)) {
       docView[k] = (docView[k] || 0) + counter.value;
     }
     const isDeleted = docView._deleted === true;
     delete docView._deleted;
-    if (isDeleted) {
-      await this.storage.delete(this.name, op.docId);
+    if (this.storage.commitOperation) {
+      await this.storage.commitOperation(this.name, op.docId, nextMeta, isDeleted ? null : docView, op);
     } else {
-      await this.storage.set(this.name, op.docId, docView);
+      await this.storage.set(`${this.name}_meta`, op.docId, nextMeta);
+      if (isDeleted) await this.storage.delete(this.name, op.docId);
+      else await this.storage.set(this.name, op.docId, docView);
+      await this.storage.saveOperation(op);
     }
     this.emit("change", op.docId);
     this.db.emit("change", { collection: this.name, docId: op.docId });
   }
 };
 
+// src/sync/operation.ts
+function assertOperation(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("SyncForge: invalid operation record");
+  }
+  const op = value;
+  if (typeof op.id !== "string" || op.id.length === 0 || typeof op.collection !== "string" || typeof op.docId !== "string" || typeof op.field !== "string" || typeof op.peerId !== "string" || op.peerId.length === 0 || !Number.isSafeInteger(op.timestamp) || op.timestamp < 0 || !["set", "delete", "inc", "dec"].includes(op.type)) {
+    throw new TypeError("SyncForge: invalid operation identity, timestamp or type");
+  }
+  if (op.type === "set" && op.value !== null && typeof op.value !== "object") {
+    throw new TypeError("SyncForge: set operation requires an object or null");
+  }
+  if ((op.type === "inc" || op.type === "dec") && (typeof op.value !== "number" || !Number.isFinite(op.value) || op.value < 0 || ["__proto__", "constructor", "prototype"].includes(op.field))) {
+    throw new TypeError("SyncForge: invalid counter operation");
+  }
+}
+
 // src/sync/vector-clock.ts
 var VectorClock = class {
   constructor(localPeerId) {
-    this.clocks = {};
+    this.clocks = /* @__PURE__ */ Object.create(null);
     this.localPeerId = localPeerId;
     this.clocks[localPeerId] = 0;
   }
@@ -574,8 +590,18 @@ var VectorClock = class {
     for (const value of Object.values(this.clocks)) {
       if (value > max) max = value;
     }
+    if (max >= Number.MAX_SAFE_INTEGER) {
+      throw new RangeError("SyncForge: logical clock exhausted");
+    }
     this.clocks[this.localPeerId] = max + 1;
     return this.clocks[this.localPeerId];
+  }
+  /** Restore a persisted high-water mark without trusting peer names as keys. */
+  restore(timestamp) {
+    if (!Number.isSafeInteger(timestamp) || timestamp < 0) {
+      throw new TypeError("SyncForge: invalid persisted clock");
+    }
+    this.clocks[this.localPeerId] = Math.max(this.getTimestamp(), timestamp);
   }
   update(remoteClock) {
     for (const [peerId, timestamp] of Object.entries(remoteClock)) {
@@ -836,8 +862,9 @@ var WebRTCTransport = class extends EventEmitter {
 
 // src/sync/sync-manager.ts
 var _SyncManager = class _SyncManager extends EventEmitter {
-  constructor(peerId) {
+  constructor(peerId, ensureCollection) {
     super();
+    this.ensureCollection = ensureCollection;
     this.connected = false;
     /**
      * Operation ids already applied, for at-least-once delivery.
@@ -851,6 +878,8 @@ var _SyncManager = class _SyncManager extends EventEmitter {
      */
     this.appliedOps = /* @__PURE__ */ new Set();
     this.appliedOrder = [];
+    this.pendingOps = /* @__PURE__ */ new Map();
+    this.operationHandlers = /* @__PURE__ */ new Map();
     this.peerId = peerId;
     this.vectorClock = new VectorClock(peerId);
     this.transport = new WebRTCTransport(peerId);
@@ -1020,7 +1049,10 @@ var _SyncManager = class _SyncManager extends EventEmitter {
       const clock = JSON.parse(clockStr);
       const operation = JSON.parse(dataStr);
       if (clock && typeof clock === "object") this.vectorClock.update(clock);
-      this.receive(operation);
+      this.receive(operation).catch((error) => {
+        this.emit("error", error);
+        console.error("SyncForge: failed to apply remote operation", error);
+      });
     } catch (e) {
       console.error("SyncForge: failed to parse remote operation", e);
     }
@@ -1035,21 +1067,32 @@ var _SyncManager = class _SyncManager extends EventEmitter {
    * safe for the non-idempotent `inc`/`dec` operations.
    */
   receive(operation) {
-    if (!operation || typeof operation !== "object") return;
+    try {
+      assertOperation(operation);
+    } catch (error) {
+      return Promise.reject(error);
+    }
     const id = operation.id;
-    if (typeof id === "string" && id.length > 0) {
-      if (this.appliedOps.has(id)) return;
-      this.appliedOps.add(id);
-      this.appliedOrder.push(id);
-      if (this.appliedOrder.length > _SyncManager.MAX_APPLIED_OPS) {
-        const evicted = this.appliedOrder.shift();
-        if (evicted !== void 0) this.appliedOps.delete(evicted);
-      }
-    }
-    if (typeof operation.peerId === "string" && typeof operation.timestamp === "number") {
-      this.vectorClock.update({ [operation.peerId]: operation.timestamp });
-    }
-    this.emit("sync", operation);
+    if (this.appliedOps.has(id)) return Promise.resolve();
+    const pending = this.pendingOps.get(id);
+    if (pending) return pending;
+    this.vectorClock.update({ [operation.peerId]: operation.timestamp });
+    this.vectorClock.restore(operation.timestamp);
+    const applying = Promise.resolve().then(async () => {
+      this.ensureCollection?.(operation.collection);
+      const handler = this.operationHandlers.get(operation.collection);
+      if (handler) await handler(operation);
+      this.markApplied(id);
+      this.emit("sync", operation);
+    });
+    this.pendingOps.set(id, applying);
+    const cleanup = () => this.pendingOps.delete(id);
+    applying.then(cleanup, cleanup);
+    return applying;
+  }
+  /** @internal Register an awaitable storage handler, separate from observers. */
+  registerOperationHandler(collection, handler) {
+    this.operationHandlers.set(collection, handler);
   }
   /** Record a locally generated operation id so an echo of it is ignored. */
   markApplied(operationId) {
@@ -1159,6 +1202,37 @@ var IndexedDBAdapter = class {
       request.onerror = () => reject(request.error);
     });
   }
+  async hasOperation(id) {
+    await this.ready;
+    if (!this.db) return false;
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction("operations", "readonly");
+      const request = transaction.objectStore("operations").get(id);
+      transaction.oncomplete = () => resolve(request.result !== void 0);
+      transaction.onabort = () => reject(transaction.error || new Error("SyncForge: operation lookup aborted"));
+      transaction.onerror = () => reject(transaction.error);
+    });
+  }
+  async commitOperation(collection, id, metadata, document, op) {
+    await this.ready;
+    if (!this.db) throw new Error("SyncForge: storage is unavailable");
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(["documents", "operations"], "readwrite");
+      transaction.oncomplete = () => resolve();
+      transaction.onabort = () => reject(transaction.error || new Error("SyncForge: operation commit aborted"));
+      transaction.onerror = () => reject(transaction.error);
+      try {
+        const documents = transaction.objectStore("documents");
+        documents.put({ collection: `${collection}_meta`, id, data: metadata });
+        if (document === null) documents.delete([collection, id]);
+        else documents.put({ collection, id, data: document });
+        transaction.objectStore("operations").put(op);
+      } catch (error) {
+        transaction.abort();
+        reject(error);
+      }
+    });
+  }
   async getOperations() {
     await this.ready;
     if (!this.db) return [];
@@ -1166,8 +1240,9 @@ var IndexedDBAdapter = class {
       const transaction = this.db.transaction("operations", "readonly");
       const store = transaction.objectStore("operations");
       const request = store.getAll();
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
+      transaction.oncomplete = () => resolve(request.result);
+      transaction.onabort = () => reject(transaction.error || new Error("SyncForge: operation history read aborted"));
+      transaction.onerror = () => reject(transaction.error);
     });
   }
 };
@@ -1187,7 +1262,7 @@ var MemoryAdapter = class {
      * members, which closes both vectors.
      */
     this.collections = /* @__PURE__ */ new Map();
-    this.operations = [];
+    this.operations = /* @__PURE__ */ new Map();
   }
   async get(collection, id) {
     const store = this.collections.get(collection);
@@ -1212,10 +1287,22 @@ var MemoryAdapter = class {
     return Array.from(store.values());
   }
   async saveOperation(op) {
-    this.operations.push(op);
+    this.operations.set(op.id, op);
+  }
+  async hasOperation(id) {
+    return this.operations.has(id);
+  }
+  async commitOperation(collection, id, metadata, document, op) {
+    for (const name of [collection, `${collection}_meta`]) {
+      if (!this.collections.has(name)) this.collections.set(name, /* @__PURE__ */ new Map());
+    }
+    this.collections.get(`${collection}_meta`).set(id, metadata);
+    if (document === null) this.collections.get(collection).delete(id);
+    else this.collections.get(collection).set(id, document);
+    this.operations.set(op.id, op);
   }
   async getOperations() {
-    return [...this.operations];
+    return [...this.operations.values()];
   }
 };
 
@@ -1241,7 +1328,9 @@ var SyncForge = class extends EventEmitter {
     } else {
       this.storage = new MemoryAdapter();
     }
-    this.syncManager = new SyncManager(this.peerId);
+    this.syncManager = new SyncManager(this.peerId, (name) => {
+      this.collection(name);
+    });
     this.syncManager.on("online", () => this.emit("online"));
     this.syncManager.on("offline", () => this.emit("offline"));
     this.syncManager.on("sync", (op) => this.emit("sync", op));
@@ -1260,9 +1349,25 @@ var SyncForge = class extends EventEmitter {
   }
   collection(name) {
     if (!this.collections.has(name)) {
-      this.collections.set(name, new Collection(name, this, this.storage, this.syncManager));
+      this.collections.set(name, new Collection(name, this, this.storage, this.syncManager, () => this.prepareLocalWrite()));
     }
     return this.collections.get(name);
+  }
+  /** Restore the logical clock before allocating any new operation identity. */
+  prepareLocalWrite() {
+    if (!this.clockReady) {
+      const pending = this.storage.getOperations().then((operations) => {
+        for (const operation of operations) assertOperation(operation);
+        for (const operation of operations) {
+          this.syncManager.getVectorClock().restore(operation.timestamp);
+        }
+      });
+      this.clockReady = pending;
+      pending.catch(() => {
+        if (this.clockReady === pending) this.clockReady = void 0;
+      });
+    }
+    return this.clockReady;
   }
   connectPeer(signalingUrl) {
     this.syncManager.connect(signalingUrl);
@@ -1292,8 +1397,9 @@ var SyncForge = class extends EventEmitter {
     if (!Array.isArray(ops)) {
       throw new TypeError("SyncForge: importData expects a JSON array of operations");
     }
+    for (const op of ops) assertOperation(op);
     for (const op of ops) {
-      this.syncManager.receive(op);
+      await this.syncManager.receive(op);
     }
   }
 };
@@ -1376,6 +1482,7 @@ export {
   Query,
   SyncForge,
   SyncManager,
-  VectorClock
+  VectorClock,
+  assertOperation
 };
 //# sourceMappingURL=index.mjs.map
