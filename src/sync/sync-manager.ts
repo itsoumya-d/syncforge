@@ -4,7 +4,7 @@
 // Contact: soumyadebnath1619@gmail.com
 
 import { EventEmitter } from '../events';
-import { Operation } from './operation';
+import type { Operation } from './operation';
 import { VectorClock } from './vector-clock';
 import { WebRTCTransport } from './webrtc-transport';
 
@@ -82,6 +82,10 @@ export class SyncManager extends EventEmitter {
    * last one closes or signaling fails permanently.
    */
   connect(signalingUrl: string, roomId: string = 'default-room'): void {
+    if (this.connected) {
+      this.connected = false;
+      this.emit('offline');
+    }
     this.emit('connecting', { signalingUrl, roomId });
     this.transport.connect(signalingUrl, roomId);
   }

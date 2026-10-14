@@ -161,7 +161,13 @@ db.connectPeer('wss://signaling.yourserver.com');
 - `collection(name: string): Collection` — returns a Collection instance.
 - `connectPeer(signalingUrl: string): void` — *starts* connecting to a signaling server. It is synchronous and returns nothing; connection success is reported via events, not by this call.
 - `isOnline(): boolean` — `true` only while at least one peer data channel is open.
-- `disconnect(): void` — disconnects from all peers.
+- `disconnect(): void` — disconnects from all peers, closes signaling and cancels pending reconnects. Call `connectPeer()` explicitly to start again.
+
+Calling `connectPeer()` again replaces the old signaling session and peers with a
+fresh connection. Unexpected signaling closes retry up to five times with
+1, 2, 4, 8 and 16 second delays; an intentional disconnect never retries.
+Callbacks from a replaced session are ignored, including unfinished peer
+negotiation. This lifecycle handling does not provide offline operation replay.
 
 #### Connection events
 
