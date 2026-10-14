@@ -7,7 +7,7 @@ export class GCounter {
   counts: Record<string, number>;
 
   constructor(counts: Record<string, number> = {}) {
-    this.counts = { ...counts };
+    this.counts = Object.assign(Object.create(null), counts);
   }
 
   increment(peerId: string, amount: number = 1): void {

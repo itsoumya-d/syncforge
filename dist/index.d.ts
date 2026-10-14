@@ -46,6 +46,8 @@ interface Operation {
     timestamp: number;
     peerId: string;
 }
+/** Validate snapshot/wire operation records before applying them. */
+declare function assertOperation(value: unknown): asserts value is Operation;
 
 interface StorageAdapter {
     get(collection: string, id: string): Promise<any>;
@@ -54,6 +56,9 @@ interface StorageAdapter {
     getAll(collection: string): Promise<any[]>;
     saveOperation(op: Operation): Promise<void>;
     getOperations(): Promise<Operation[]>;
+    /** Optional atomic document, CRDT metadata and operation-log commit. */
+    commitOperation?(collection: string, id: string, metadata: any, document: any | null, op: Operation): Promise<void>;
+    hasOperation?(id: string): Promise<boolean>;
 }
 
 declare class VectorClock {
@@ -74,12 +79,15 @@ declare class VectorClock {
      * the replica's own local write.
      */
     increment(): number;
+    /** Restore a persisted high-water mark without trusting peer names as keys. */
+    restore(timestamp: number): void;
     update(remoteClock: Record<string, number>): void;
     getClock(): Record<string, number>;
     getTimestamp(): number;
 }
 
 declare class SyncManager extends EventEmitter {
+    private ensureCollection?;
     private peerId;
     private vectorClock;
     private connected;
@@ -97,7 +105,9 @@ declare class SyncManager extends EventEmitter {
     private appliedOps;
     private appliedOrder;
     private static readonly MAX_APPLIED_OPS;
-    constructor(peerId: string);
+    private pendingOps;
+    private operationHandlers;
+    constructor(peerId: string, ensureCollection?: ((name: string) => void) | undefined);
     /**
      * Begin connecting.
      *
@@ -140,13 +150,16 @@ declare class SyncManager extends EventEmitter {
      * Duplicates are dropped by operation id so that at-least-once delivery is
      * safe for the non-idempotent `inc`/`dec` operations.
      */
-    receive(operation: Operation): void;
+    receive(operation: Operation): Promise<void>;
+    /** @internal Register an awaitable storage handler, separate from observers. */
+    registerOperationHandler(collection: string, handler: (op: Operation) => Promise<void>): void;
     /** Record a locally generated operation id so an echo of it is ignored. */
     markApplied(operationId: string): void;
     getVectorClock(): VectorClock;
 }
 
 declare class Collection extends EventEmitter {
+    private prepareWrite;
     private name;
     private db;
     private storage;
@@ -162,7 +175,7 @@ declare class Collection extends EventEmitter {
      * different documents still run concurrently.
      */
     private applyQueues;
-    constructor(name: string, db: SyncForge, storage: StorageAdapter, sync: SyncManager);
+    constructor(name: string, db: SyncForge, storage: StorageAdapter, sync: SyncManager, prepareWrite?: () => Promise<void>);
     set(id: string, data: object): Promise<void>;
     get(id: string): Promise<Document | null>;
     delete(id: string): Promise<void>;
@@ -189,10 +202,13 @@ declare class SyncForge extends EventEmitter {
     private collections;
     private syncManager;
     private storage;
+    private clockReady?;
     constructor(options: SyncForgeOptions);
     /** True only when at least one peer data channel is open. */
     isOnline(): boolean;
     collection(name: string): Collection;
+    /** Restore the logical clock before allocating any new operation identity. */
+    private prepareLocalWrite;
     connectPeer(signalingUrl: string): void;
     disconnect(): void;
     exportData(): Promise<string>;
@@ -310,6 +326,8 @@ declare class IndexedDBAdapter implements StorageAdapter {
     delete(collection: string, id: string): Promise<void>;
     getAll(collection: string): Promise<any[]>;
     saveOperation(op: Operation): Promise<void>;
+    hasOperation(id: string): Promise<boolean>;
+    commitOperation(collection: string, id: string, metadata: any, document: any | null, op: Operation): Promise<void>;
     getOperations(): Promise<Operation[]>;
 }
 
@@ -332,7 +350,9 @@ declare class MemoryAdapter implements StorageAdapter {
     delete(collection: string, id: string): Promise<void>;
     getAll(collection: string): Promise<any[]>;
     saveOperation(op: Operation): Promise<void>;
+    hasOperation(id: string): Promise<boolean>;
+    commitOperation(collection: string, id: string, metadata: any, document: any | null, op: Operation): Promise<void>;
     getOperations(): Promise<Operation[]>;
 }
 
-export { Collection, type Document, EventEmitter, GCounter, IndexedDBAdapter, LWWMap, LWWRegister, MemoryAdapter, ORSet, type Operation, type OperationType, PNCounter, Query, type StorageAdapter, SyncForge, type SyncForgeOptions, SyncManager, VectorClock };
+export { Collection, type Document, EventEmitter, GCounter, IndexedDBAdapter, LWWMap, LWWRegister, MemoryAdapter, ORSet, type Operation, type OperationType, PNCounter, Query, type StorageAdapter, SyncForge, type SyncForgeOptions, SyncManager, VectorClock, assertOperation };

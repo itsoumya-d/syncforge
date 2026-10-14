@@ -12,4 +12,7 @@ export interface StorageAdapter {
   getAll(collection: string): Promise<any[]>;
   saveOperation(op: Operation): Promise<void>;
   getOperations(): Promise<Operation[]>;
+  /** Optional atomic document, CRDT metadata and operation-log commit. */
+  commitOperation?(collection: string, id: string, metadata: any, document: any | null, op: Operation): Promise<void>;
+  hasOperation?(id: string): Promise<boolean>;
 }
