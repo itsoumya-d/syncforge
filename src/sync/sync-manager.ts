@@ -84,6 +84,10 @@ export class SyncManager extends EventEmitter {
    * last one closes or signaling fails permanently.
    */
   connect(signalingUrl: string, roomId: string = 'default-room'): void {
+    if (this.connected) {
+      this.connected = false;
+      this.emit('offline');
+    }
     this.emit('connecting', { signalingUrl, roomId });
     this.transport.connect(signalingUrl, roomId);
   }
