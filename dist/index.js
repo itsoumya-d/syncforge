@@ -882,7 +882,7 @@ var WebRTCTransport = class extends EventEmitter {
       this.emit("peer-connected", remotePeerId);
     };
     dc.onclose = () => {
-      if (!isCurrent() || this.dataChannels.get(remotePeerId) !== dc) return;
+      if (this.dataChannels.get(remotePeerId) !== dc) return;
       this.dataChannels.delete(remotePeerId);
       this.emit("peer-disconnected", remotePeerId);
     };
