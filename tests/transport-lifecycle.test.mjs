@@ -148,3 +148,28 @@ test('replacing a connected session resets public online state', async t => {
   assert.equal(f.manager.isConnected(), false); assert.equal(offline.length, 1);
   channel.onclose(); assert.equal(offline.length, 1);
 });
+
+test('replaced peer closing its registered channel updates online state', async t => {
+  const f = fixture(t); f.manager.connect('wss://one');
+  await f.sockets[0].onmessage({ data: '{"type":"peer-joined","peerId":"remote"}' });
+  const old = f.peers[0].channel; old.readyState = 'open'; old.onopen();
+  const offline = []; f.manager.on('offline', () => offline.push(true));
+  await f.sockets[0].onmessage({ data: '{"type":"offer","peerId":"remote","offer":{}}' });
+  old.readyState = 'closed'; old.onclose();
+  assert.equal(f.manager.isConnected(), false);
+  assert.equal(offline.length, 1);
+  old.onclose(); assert.equal(offline.length, 1);
+});
+
+test('old channel close cannot remove an already opened replacement channel', async t => {
+  const f = fixture(t); f.manager.connect('wss://one');
+  await f.sockets[0].onmessage({ data: '{"type":"peer-joined","peerId":"remote"}' });
+  const old = f.peers[0].channel; old.readyState = 'open'; old.onopen();
+  await f.sockets[0].onmessage({ data: '{"type":"offer","peerId":"remote","offer":{}}' });
+  const next = { readyState: 'open' }; f.peers[1].ondatachannel({ channel: next }); next.onopen();
+  const offline = []; f.manager.on('offline', () => offline.push(true));
+  old.readyState = 'closed'; old.onclose();
+  assert.equal(f.manager.isConnected(), true); assert.equal(offline.length, 0);
+  next.readyState = 'closed'; next.onclose();
+  assert.equal(f.manager.isConnected(), false); assert.equal(offline.length, 1);
+});
