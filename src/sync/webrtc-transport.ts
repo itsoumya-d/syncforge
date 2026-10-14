@@ -264,7 +264,10 @@ export class WebRTCTransport extends EventEmitter {
     };
 
     dc.onclose = () => {
-      if (!isCurrent() || this.dataChannels.get(remotePeerId) !== dc) return;
+      // The owning peer may already have been replaced while its channel's
+      // close event was queued. Remove only this still-registered channel;
+      // never let an old close remove an opened replacement channel.
+      if (this.dataChannels.get(remotePeerId) !== dc) return;
       this.dataChannels.delete(remotePeerId);
       this.emit('peer-disconnected', remotePeerId);
     };
