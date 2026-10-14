@@ -603,15 +603,22 @@ var WebRTCTransport = class extends EventEmitter {
     this.roomId = "";
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 5;
+    this.reconnectTimer = null;
+    this.active = false;
+    this.generation = 0;
     this.messageHandler = null;
     this.peerId = peerId;
   }
   connect(signalingUrl, roomId) {
+    this.disconnect();
     this.signalingUrl = signalingUrl;
     this.roomId = roomId;
+    this.active = true;
+    this.reconnectAttempts = 0;
     this.connectWebSocket();
   }
   connectWebSocket() {
+    if (!this.active) return;
     if (typeof WebSocket === "undefined") {
       this.emit("error", new Error("SyncForge: no WebSocket implementation available in this environment"));
       return;
@@ -623,16 +630,22 @@ var WebRTCTransport = class extends EventEmitter {
       this.emit("signaling-failed", { url: this.signalingUrl, attempts: this.reconnectAttempts, cause: err });
       return;
     }
-    this.ws.onopen = () => {
+    const socket = this.ws;
+    const generation = this.generation;
+    const isCurrent = () => this.active && this.generation === generation && this.ws === socket;
+    socket.onopen = () => {
+      if (!isCurrent()) return;
       this.reconnectAttempts = 0;
       this.emit("signaling-open", this.signalingUrl);
-      this.ws?.send(JSON.stringify({ type: "join", roomId: this.roomId, peerId: this.peerId }));
+      if (isCurrent()) socket.send(JSON.stringify({ type: "join", roomId: this.roomId, peerId: this.peerId }));
     };
-    this.ws.onerror = (event) => {
+    socket.onerror = (event) => {
+      if (!isCurrent()) return;
       this.emit("error", new Error("SyncForge: signaling socket error for " + this.signalingUrl));
       void event;
     };
-    this.ws.onmessage = async (event) => {
+    socket.onmessage = async (event) => {
+      if (!isCurrent()) return;
       let message;
       try {
         message = JSON.parse(event.data);
@@ -656,12 +669,20 @@ var WebRTCTransport = class extends EventEmitter {
         console.warn("SyncForge: Error handling signaling message", err);
       }
     };
-    this.ws.onclose = () => {
+    socket.onclose = () => {
+      if (!isCurrent()) return;
+      this.ws = null;
       this.emit("signaling-closed", this.signalingUrl);
+      if (!this.active || this.generation !== generation) return;
       if (this.reconnectAttempts < this.maxReconnectAttempts) {
         const backoff = Math.pow(2, this.reconnectAttempts) * 1e3;
         this.reconnectAttempts++;
-        setTimeout(() => this.connectWebSocket(), backoff);
+        const timer = setTimeout(() => {
+          if (!this.active || this.generation !== generation || this.reconnectTimer !== timer) return;
+          this.reconnectTimer = null;
+          this.connectWebSocket();
+        }, backoff);
+        this.reconnectTimer = timer;
       } else {
         this.emit("signaling-failed", {
           url: this.signalingUrl,
@@ -672,11 +693,14 @@ var WebRTCTransport = class extends EventEmitter {
     };
   }
   async handlePeerJoined(remotePeerId) {
+    const generation = this.generation;
     const pc = this.createPeerConnection(remotePeerId);
     const dc = this.createDataChannelForPeer(pc, "sync");
     this.setupDataChannel(remotePeerId, dc);
     const offer = await pc.createOffer();
+    if (!this.isCurrentPeer(remotePeerId, pc, generation)) return;
     await pc.setLocalDescription(offer);
+    if (!this.isCurrentPeer(remotePeerId, pc, generation)) return;
     this.ws?.send(JSON.stringify({
       type: "offer",
       target: remotePeerId,
@@ -685,6 +709,7 @@ var WebRTCTransport = class extends EventEmitter {
     }));
   }
   async handleOffer(remotePeerId, offer) {
+    const generation = this.generation;
     const existingPc = this.peers.get(remotePeerId);
     if (existingPc) {
       try {
@@ -695,11 +720,15 @@ var WebRTCTransport = class extends EventEmitter {
     }
     const pc = this.createPeerConnection(remotePeerId);
     pc.ondatachannel = (event) => {
+      if (!this.isCurrentPeer(remotePeerId, pc, generation)) return;
       this.setupDataChannel(remotePeerId, event.channel);
     };
     await pc.setRemoteDescription(offer);
+    if (!this.isCurrentPeer(remotePeerId, pc, generation)) return;
     const answer = await pc.createAnswer();
+    if (!this.isCurrentPeer(remotePeerId, pc, generation)) return;
     await pc.setLocalDescription(answer);
+    if (!this.isCurrentPeer(remotePeerId, pc, generation)) return;
     this.ws?.send(JSON.stringify({
       type: "answer",
       target: remotePeerId,
@@ -727,11 +756,16 @@ var WebRTCTransport = class extends EventEmitter {
     }
     this.dataChannels.delete(remotePeerId);
   }
+  isCurrentPeer(remotePeerId, pc, generation) {
+    return this.active && this.generation === generation && this.peers.get(remotePeerId) === pc;
+  }
   createPeerConnection(remotePeerId) {
+    const generation = this.generation;
     const pc = new RTCPeerConnection({
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
     });
     pc.oniceconnectionstatechange = () => {
+      if (!this.isCurrentPeer(remotePeerId, pc, generation)) return;
       const state = pc.iceConnectionState;
       this.emit("ice-state", { peerId: remotePeerId, state });
       if (state === "failed") {
@@ -747,6 +781,7 @@ var WebRTCTransport = class extends EventEmitter {
       }
     };
     pc.onicecandidateerror = (event) => {
+      if (!this.isCurrentPeer(remotePeerId, pc, generation)) return;
       this.emit("ice-candidate-error", {
         peerId: remotePeerId,
         errorCode: event && event.errorCode,
@@ -755,6 +790,7 @@ var WebRTCTransport = class extends EventEmitter {
       });
     };
     pc.onicecandidate = (event) => {
+      if (!this.isCurrentPeer(remotePeerId, pc, generation)) return;
       if (event.candidate) {
         this.ws?.send(JSON.stringify({
           type: "ice-candidate",
@@ -771,16 +807,22 @@ var WebRTCTransport = class extends EventEmitter {
     return pc.createDataChannel(label);
   }
   setupDataChannel(remotePeerId, dc) {
+    const generation = this.generation;
+    const owner = this.peers.get(remotePeerId);
+    const isCurrent = () => owner !== void 0 && this.isCurrentPeer(remotePeerId, owner, generation);
     dc.binaryType = "arraybuffer";
     dc.onopen = () => {
+      if (!isCurrent()) return;
       this.dataChannels.set(remotePeerId, dc);
       this.emit("peer-connected", remotePeerId);
     };
     dc.onclose = () => {
+      if (!isCurrent() || this.dataChannels.get(remotePeerId) !== dc) return;
       this.dataChannels.delete(remotePeerId);
       this.emit("peer-disconnected", remotePeerId);
     };
     dc.onmessage = (event) => {
+      if (!isCurrent() || this.dataChannels.get(remotePeerId) !== dc) return;
       if (!this.messageHandler) return;
       try {
         this.messageHandler(event.data);
@@ -822,10 +864,13 @@ var WebRTCTransport = class extends EventEmitter {
     return delivered;
   }
   disconnect() {
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
-    }
+    this.active = false;
+    this.generation++;
+    if (this.reconnectTimer !== null) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    const socket = this.ws;
+    this.ws = null;
+    if (socket) socket.close();
     for (const pc of this.peers.values()) {
       pc.close();
     }
@@ -892,6 +937,10 @@ var _SyncManager = class _SyncManager extends EventEmitter {
    * last one closes or signaling fails permanently.
    */
   connect(signalingUrl, roomId = "default-room") {
+    if (this.connected) {
+      this.connected = false;
+      this.emit("offline");
+    }
     this.emit("connecting", { signalingUrl, roomId });
     this.transport.connect(signalingUrl, roomId);
   }

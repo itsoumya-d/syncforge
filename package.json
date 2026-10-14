@@ -19,6 +19,7 @@
     "url": "https://github.com/itsoumya-d/syncforge/issues"
   },
   "scripts": {
+    "typecheck": "tsc --noEmit",
     "build": "tsup src/index.ts --format cjs,esm --dts",
     "test": "node --test tests/*.test.mjs",
     "prepublishOnly": "npm run build"
